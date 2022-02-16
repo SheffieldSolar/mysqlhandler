@@ -1,20 +1,22 @@
 '''
-Created on 2 Mar 2015
+Created on 2022-02-01
 
-@author: ph1jb
+@author: Julian Briggs
 
 Docs on installing and using 3 Python mysql connectors: mysql.connector, mysqlDB, pymysql
 https://www.a2hosting.co.uk/kb/developer-corner/mysql/connecting-to-mysql-using-python
 
+https://py-pkgs.org/07-releasing-versioning.html
 '''
 from logging import debug
 from time import sleep
-from typing import  Tuple, List, Any
+from typing import  Tuple, List, Any, Dict
 
 from mysql import connector
 from mysql.connector.errorcode import ER_LOCK_WAIT_TIMEOUT, CR_SERVER_LOST, CR_SERVER_LOST_EXTENDED
 
 Rows = List[Tuple[Any, ...]]
+version = '0.1.0'
 
 
 class MysqlHandler():
@@ -38,6 +40,7 @@ class MysqlHandler():
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # pylint: disable=unused-argument
         self.cnx.close()
 
     def close(self):
@@ -67,7 +70,7 @@ class MysqlHandler():
         debug('statement %(statement)s', {'statement':statement})
         return statement
 
-    def execute(self, statement) -> None:
+    def execute(self, statement:str) -> None:
         '''MySQL execute statement (typically insert)
         '''
         cursor = self.cnx.cursor()
@@ -95,7 +98,7 @@ class MysqlHandler():
             i_1 = min((i + chunk_size, len_rows))
             self.executemany(statement, rows[i:i_1])
 
-    def executemulti(self, statement):
+    def executemulti(self, statement:str):
         '''MySQL query with multiple statements.
         Use this rarely, perhaps to execute an SQL script to create tables etc.
         :param statement: e.g create table t1 ...; create table t2 ...
@@ -107,40 +110,51 @@ class MysqlHandler():
         cursor.close()
         return results
 
-    def fetchone(self, statement) -> Tuple[Any]:
+    def fetchone(self, statement, params:Dict[str, Any]=None) -> Tuple[Any]:
         '''MySQL query (typically select) with one row result expected
+         Cannot parameterise table name. Can only parameterise values.
         :param statement: e.g. select * from table t where id = 1
+        :param params: dict e.g. {'table0':table0,'table1':table1,}
         :return: e.g. (0,1,2)
         '''
-        debug('query: %(statement)s', {'statement':statement})
+        if params is None:
+            params = {}
+        debug('statement: %(statement)s', {'statement':statement})
+        debug('params: %(params)s', {'params':params})
         cursor = self.cnx.cursor()
-        cursor.execute(statement)
+        cursor.execute(statement, params=params)
         row = cursor.fetchone()
         cursor.close()
         return row
 
-    def fetchall(self, statement) -> Rows:
+    def fetchall(self, statement:str, params:Dict[str, Any]=None) -> Rows:
         '''MySQL query (typically select) with many rows expected
          (but not so many as to exhaust memory)
+         Cannot parameterise table name. Can only parameterise values.
         :param statement: e.g. select * from table t
+        :param params: dict e.g. {'table0':table0,'table1':table1,}
         :return: e.g. [(0,1,2),(3,4,5),]
         '''
         debug('self.cnx: %(cnx)s', {'cnx':self.cnx})
-        debug(statement)
+        debug('statement: %(statement)s', {'statement':statement})
+        debug('params: %(params)s', {'params':params})
+        if params is None:
+            params = {}
         cursor = self.cnx.cursor()
-        cursor.execute(statement)
+        cursor.execute(statement, params=params)
         rows = cursor.fetchall()
         cursor.close()
         return rows
 
-    def insert_on_duplicate_key_update(self, table:str, cols:List[str], cols_on_dup:List[str], rows:Rows) -> None:
-        '''MySQL insert query
+    def insert_on_duplicate_key_update(self, table:str, cols:List[str], cols_on_dup:List[str], rows:Rows, on_dup:str='') -> None:
+        '''MySQL insert ... on duplicate key update
         :param table: table to insert into
         :param cols: columns to insert
         :param cols_on_dup: on duplicate key update columns
         :param rows: list of tuples of data to insert
+        :param on_dup: optional on duplicate key update string, e.g. 'first_name=vals.first_name,last_name=UPPER(vals.last_name)'
         '''
-        on_dup = self.on_dup(cols_on_dup)
+        on_dup = on_dup or self.on_dup(cols_on_dup)
         statement = self.create_on_duplicate_key_update_statement(table, cols, on_dup)
         debug(statement)
         self.executemany(statement, rows)
@@ -162,43 +176,25 @@ class MysqlHandler():
         debug('on_dup %(on_dup)s', {'on_dup':on_dup})
         return on_dup
 
-    def retry(self, method, statement, data=None, nretries=8):
+    def retry(self, method, *args, nretries=8, **kwargs):
+        # pylint: disable=unused-argument
         '''Wrapper to retry MySQL queries up to nretries times with exponential back-off
-        eg if nretries = 8 (default) retry (on error) after 1, 2, 4, 8, 16, 32, 64 and 128 seconds
-        Usage: retry(query, statement, data)
+        eg if nretries = 6 (default) retry (on error) after 1, 2, 4, 8, 16, 32, 64, 128 seconds
+        Call this: retry(query, statement, params)
         :param method: database table column names
-        :param statement: database table column names
-        :param data: database table column names
-        :param nretries: database table column names
+        :param args: positional args to method
+        :param nretries: number of retries
+        :param kwargs: keyword args to method
         :returns: whatever the method returns
+        :raises connector.Error: if connector.Error persists after all retries
         '''
-        if data is None:
-            data = []
+        ex_last = None
         for i in range(nretries):
             try:
-                return method(statement, data)
-            except connector.Error as err:
-                if i < (nretries - 1) and err.errno in (CR_SERVER_LOST, CR_SERVER_LOST_EXTENDED, ER_LOCK_WAIT_TIMEOUT):
-                    sleep(2 ** i)  # retry
-                else:
-                    raise  # raise exception (exits the for loop)
-
-    def retry2(self, method, *args, nretries=8, **kwargs):
-        '''Wrapper to retry MySQL queries up to nretries times with exponential back-off
-        eg if nretries = 8 (default) retry (on error) after 1, 2, 4, 8, 16, 32, 64 and 128 seconds
-        Call this: retry(query, statement, data)
-        :param method: database table column names
-        :param statement: database table column names
-        :param data: database table column names
-        :param nretries: database table column names
-        :returns: whatever the method returns
-        '''
-        for i in range(nretries):
-            try:
+                print(f'retry: i {i}')
                 return method(*args, **kwargs)
-            except connector.Error as err:
-                if i < (nretries - 1) and err.errno in (CR_SERVER_LOST, CR_SERVER_LOST_EXTENDED, ER_LOCK_WAIT_TIMEOUT):
-                    sleep(2 ** i)  # retry
-                else:
-                    raise  # raise exception (exits the for loop)
+            except connector.Error as ex:
+                ex_last = ex
+                sleep(2 ** i)  # retry
+        raise(ex_last)  # raise exception (exits the for loop)
 

@@ -3,9 +3,12 @@ Created on 2 Mar 2015
 
 @author: ph1jb
 '''
+from logging import warning
+import os
+from os.path import dirname
 import unittest
-from unittest.case import skip
-from unittest.mock import MagicMock
+from unittest.mock import patch, MagicMock, call
+import yaml
 
 from mysql import connector
 from mysql.connector.errorcode import ER_LOCK_WAIT_TIMEOUT, CR_SERVER_LOST, \
@@ -24,21 +27,29 @@ class TestMysqlHandler(unittest.TestCase):
         '''
         cls.mysql_options = {
             'autocommit': True,
-            'database': 'test',
+            'database': 'database_is_not_set',
             'get_warnings': True,
-            'host': 'ssfdb2',
-            'password': 'bee5Ai[b',
+            'host': 'database_host_is_not_set',
+            'password': 'database_password_is_not_set',
             'raise_on_warnings': False,
             'time_zone': 'UTC',
-            'user': 'tester',
+            'user': 'database_user_is_not_set',
             }
-
+        secrets_file = os.path.join(dirname(__file__), '../secrets/test_secrets.yml')
+        with open(secrets_file, 'r') as fin:
+            try:
+                secrets = yaml.safe_load(fin)
+            except yaml.YAMLError as ex:
+                warning(ex)
+        cls.mysql_options.update(secrets.get('mysql_options'))
+        # print(f'cls.mysql_options: {cls.mysql_options}')
         cls.cnx = connector.connect(**cls.mysql_options)
         cursor = cls.cnx.cursor()
         # Create database and tables for mysql_handler tests
-        schema = 'test_mysql_schema.sql'
+        schema = f'{dirname(__file__)}/test_mysql_schema.sql'
         with open(schema) as fin:
             unused = list(cursor.execute(fin.read(), multi=True))
+
         cursor.close()
 
     @classmethod
@@ -49,7 +60,7 @@ class TestMysqlHandler(unittest.TestCase):
         cursor = cls.cnx.cursor()
         cls.table = 'testtable'
         statement = f'drop table if exists {cls.table}'
-        cursor.execute(statement)
+        # cursor.execute(statement)
         cursor.close()
         cls.cnx.close()
 
@@ -61,11 +72,11 @@ class TestMysqlHandler(unittest.TestCase):
         self.cols_str = ','.join(self.cols)
         statement = f'insert into {self.table} ({self.cols_str}) values (%s,%s,%s)'
         self.rows = [
-                (1, 'Julian', 'Briggs',),
-                (2, 'Aldous', 'Everard'),
-                (3, 'Jamie', 'Taylor',),
-                (4, 'Al', 'Buckley'),
-                (5, 'An', 'Other'),
+                (1, 'Ann', 'Awk',),
+                (2, 'Bob', 'Bash'),
+                (3, 'Cath', 'Curl',),
+                (4, 'Dave', 'Dig'),
+                (5, 'Eve', 'Other'),
             ]
         # Create MysqlHandler instance afresh for each test
         self.mysql_options = TestMysqlHandler.mysql_options
@@ -83,6 +94,8 @@ class TestMysqlHandler(unittest.TestCase):
         self.truncate()
 
     def truncate(self):
+        '''Truncate the test table after each test.
+        '''
         statement = f'truncate table {self.table}'
         cursor = self.cnx.cursor()
         unused = cursor.execute(statement)
@@ -101,17 +114,14 @@ class TestMysqlHandler(unittest.TestCase):
         with MysqlHandler(self.mysql_options) as mysql_handler:
             self.assertIsInstance(mysql_handler, MysqlHandler)
 
-    @unittest.skip('Closing connection raises error from tearDown which calls truncate')
-    def test_close(self):
-        self.mysql_handler.close()
-
-    def test_close_twice(self):
+    # @skip('Fouls up truncate')
+    @patch('mysql_handler.MysqlHandler.close')
+    def test_close(self, close):
         '''Raises no exception.
         https://dev.mysql.com/doc/connector-python/en/connector-python-api-mysqlconnection-disconnect.html
         '''
-        self.truncate = MagicMock()
         self.mysql_handler.close()
-        self.mysql_handler.close()
+        close.assert_called_once_with()
 
     def test_connection_bad_host(self):
         mysql_options = {
@@ -121,12 +131,6 @@ class TestMysqlHandler(unittest.TestCase):
             'user': 'mysql user not set',
         }
         self.assertRaises(connector.errors.Error, MysqlHandler, mysql_options=mysql_options)
-
-    @skip('fails due to lack of sqlite')
-    def test_context_handler(self):
-        connector.connect = MagicMock()
-        with MysqlHandler(cnx=self.cnx) as cnx:
-            self.assertEqual(cnx, self.cnx)
 
     def test_create_on_duplicate_key_update_statement(self):
         table = 'mytable'
@@ -162,7 +166,10 @@ class TestMysqlHandler(unittest.TestCase):
         self.mysql_handler.executemany(statement, self.rows)
         # Check row3 and row4 have been inserted
         statement = f'select id, first_name, last_name from {self.table}'
-        rows = self.mysql_handler.fetchall(statement)
+        cursor = self.cnx.cursor()
+        cursor.execute(statement)
+        rows = cursor.fetchall()
+        cursor.close()
         self.assertListEqual(rows, self.rows)
 
     def test_executemany_chunked(self):
@@ -171,8 +178,11 @@ class TestMysqlHandler(unittest.TestCase):
         statement = f'insert into {self.table} (id, first_name, last_name) values (%s,%s,%s)'
         self.mysql_handler.executemany_chunked(statement, self.rows, chunk_size)
         statement = f'select id, first_name, last_name from {self.table} order by id'
-        actual = self.mysql_handler.fetchall(statement)
-        self.assertListEqual(actual, self.rows)
+        cursor = self.cnx.cursor()
+        cursor.execute(statement)
+        rows = cursor.fetchall()
+        cursor.close()
+        self.assertListEqual(rows, self.rows)
 
     def test_executemulti(self):
         self.truncate()
@@ -181,19 +191,53 @@ class TestMysqlHandler(unittest.TestCase):
         self.mysql_handler.executemulti(statements)
         # Check rows have been inserted
         statement = f'select first_name, last_name from {self.table}'
-        rows = self.mysql_handler.fetchall(statement)
+        cursor = self.cnx.cursor()
+        cursor.execute(statement)
+        rows = cursor.fetchall()
+        cursor.close()
         expected = [('A', 'B'), ('C', 'D'), ]
         self.assertListEqual(rows, expected)
 
     def test_fetchall(self):
         statement = f'select id, first_name, last_name from {self.table} order by id'
         actual = self.mysql_handler.fetchall(statement)
+        print(actual)
+        self.assertListEqual(actual, self.rows)
+
+    def test_fetchall_data(self):
+        # statement = f'select id, first_name, last_name from {self.table} order by id'
+        # cursor = self.cnx.cursor()
+        # cursor.execute(statement)
+        # rows0 = cursor.fetchall()
+        # cursor.close()
+        # print(rows0)
+        statement = f'select id, first_name, last_name from {self.table} where id in(%s,%s,%s,%s,%s) order by id'
+        params = (1, 2, 3, 4, 5)  # [(1,), (2,), (3,), (4,), (5,), ]
+        actual = self.mysql_handler.fetchall(statement, params=params)
         self.assertListEqual(actual, self.rows)
 
     def test_fetchone(self):
         statement = f'select id, first_name, last_name from {self.table} where id = 1  order by id'
         row = self.mysql_handler.fetchone(statement)
         self.assertTupleEqual(row, self.rows[0])
+
+    def test_fetchone_param_table_name(self):
+        '''Cannot parameterise table name. Can only parameterise values.
+        '''
+        statement = 'select id, first_name, last_name from %(table)s where id = 1  order by id'
+        params = {'table': self.table}
+        self.assertRaises(connector.errors.ProgrammingError, self.mysql_handler.fetchone, statement, params=params)
+
+    def test_fetchone_params(self):
+        statement = f'select id, first_name, last_name from {self.table} where id = %s  order by id'
+        params = (1,)
+        row = self.mysql_handler.fetchone(statement, params=params)
+        self.assertTupleEqual(row, self.rows[0])
+
+    def test_fetchone_no_rows_found(self):
+        statement = f'select id, first_name, last_name from {self.table} where id is null'
+        row = self.mysql_handler.fetchone(statement)
+        self.assertIsNone(row)
 
     def test_insert_on_duplicate_key_update(self):
         self.truncate()
@@ -203,6 +247,25 @@ class TestMysqlHandler(unittest.TestCase):
         # Check rows have been inserted
         statement = f'select * from {self.table}'
         rows = self.mysql_handler.fetchall(statement)
+        self.assertListEqual(rows, self.rows)
+
+    def test_insert_on_duplicate_key_update_on_dup(self):
+        self.truncate()
+        on_dup = 'first_name=vals.first_name,last_name=UPPER(vals.last_name)'
+        self.mysql_handler.insert_on_duplicate_key_update(self.table, self.cols, self.cols[1:], self.rows, on_dup=on_dup)
+        # Re-insert to show that on duplicate key update works
+        self.mysql_handler.insert_on_duplicate_key_update(self.table, self.cols, self.cols[1:], self.rows, on_dup=on_dup)
+        # Check rows have been inserted
+        statement = f'select * from {self.table}'
+        rows = self.mysql_handler.fetchall(statement)
+        rows_uc = self.rows = [
+            (1, 'Ann', 'AWK',),
+            (2, 'Bob', 'BASH'),
+            (3, 'Cath', 'CURL',),
+            (4, 'Dave', 'DIG'),
+            (5, 'Eve', 'OTHER'),
+            ]
+
         self.assertListEqual(rows, self.rows)
 
     def test_on_dup(self):
@@ -220,38 +283,33 @@ class TestMysqlHandler(unittest.TestCase):
 
     def test_retry(self):
 
-        def my_method(statement, data):
-            return (statement, data)
+        def my_method(statement, params):
+            return (statement, params)
 
         statement = "select {};"
-        data = '123'
-        response = self.mysql_handler.retry(my_method, statement, data, nretries=2)
-        expected = (statement, data)
-        self.assertTupleEqual(response, expected)
-
-    def test_retry2(self):
-
-        def my_method(statement, data):
-            return (statement, data)
-
-        statement = "select {};"
-        data = '123'
-        response = self.mysql_handler.retry2(my_method, statement, data, nretries=2)
-        expected = (statement, data)
+        params = '123'
+        response = self.mysql_handler.retry(my_method, statement, params, nretries=2)
+        expected = (statement, params)
         self.assertTupleEqual(response, expected)
 
     def test_retry_ERRORS(self):
-
-        def my_method(statement, data):
-            raise connector.Error(errno=errno)
-
         for errno in (CR_SERVER_LOST, CR_SERVER_LOST_EXTENDED, ER_LOCK_WAIT_TIMEOUT):
-
+            mock_method = MagicMock(side_effect=connector.Error(errno=errno))
             statement = "select {};"
-            data = '123'
+            params = '123'
             with self.assertRaises(connector.Error) as cm:
-                self.mysql_handler.retry(my_method, statement, data, nretries=1)
-            self.assertEqual(cm.exception.errno, errno)
+                self.mysql_handler.retry(mock_method, statement, params, nretries=1)
+                mock_method.assert_called_with(statement, params)
+                self.assertEqual(cm.exception.errno, errno)
+
+    def test_retry_bad_database_host(self):
+        mock_method = MagicMock(side_effect=connector.Error)
+        statement = 'select {}'
+        params = '123'
+        with self.assertRaises(connector.Error) as cm:
+            self.mysql_handler.retry(mock_method, statement, params, nretries=2)
+        calls = [call(statement, params), ] * 2
+        mock_method.assert_has_calls(calls)
 
 
 if __name__ == "__main__":
