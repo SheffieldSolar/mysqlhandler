@@ -7,24 +7,40 @@ Docs on installing and using 3 Python mysql connectors: mysql.connector, mysqlDB
 https://www.a2hosting.co.uk/kb/developer-corner/mysql/connecting-to-mysql-using-python
 
 https://py-pkgs.org/07-releasing-versioning.html
+
+Cursors:
+https://dev.mysql.com/doc/connector-python/en/connector-python-api-mysqlconnection-cursor.html
+
+https://dev.mysql.com/doc/connector-python/en/connector-python-api-mysqlcursor-close.html
+Use close() when you are done using a cursor. This method closes the cursor, resets all results,
+and ensures that the cursor object has no reference to its original connection object.
+
+https://stackoverflow.com/questions/5669878/when-to-close-cursors-using-mysqldb
+
 '''
+from contextlib import AbstractContextManager, closing
 from logging import debug
 from time import sleep
-from typing import  Tuple, List, Any, Dict
+from typing import Any, Dict, List, Tuple
 
 from mysql import connector
-from mysql.connector.errorcode import ER_LOCK_WAIT_TIMEOUT, CR_SERVER_LOST, CR_SERVER_LOST_EXTENDED
 
 Rows = List[Tuple[Any, ...]]
-version = '0.1.0'
 
 
-class MysqlHandler():
+class MysqlHandler(AbstractContextManager):
 
     '''Insert and query database.
     constructor takes database connection to allow testing with sqlite and running with mysql.
     Create cnx if cnx=None and mysql_options are passed in
     '''
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # pylint: disable=unused-argument
+        self.cnx.close()
 
     def __init__(self, mysql_options, cnx=None):
         self.cnx = cnx
@@ -35,13 +51,6 @@ class MysqlHandler():
             debug('MysqlHandler.__init__.mysql_options: %(mysql_options)s', {'mysql_options':self.mysql_options})
             self.cnx = connector.connect(**self.mysql_options)
             self.mysql_version = self.fetchone('SELECT VERSION();')[0]
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        # pylint: disable=unused-argument
-        self.cnx.close()
 
     def close(self):
         '''Close database connection.
@@ -73,18 +82,16 @@ class MysqlHandler():
     def execute(self, statement:str) -> None:
         '''MySQL execute statement (typically insert)
         '''
-        cursor = self.cnx.cursor()
-        cursor.execute(statement)
-        cursor.close()
+        with closing(self.cnx.cursor()) as cursor:
+            cursor.execute(statement)
 
     def executemany(self, statement:str, rows:Rows) -> None:
         '''MySQL execute statement (typically insert) with multiple rows.
         :param statement: e.g. insert into table t (a,b,c) values(%s,%s,%s)
         :param rows: e.g.: [(0,1,2),(3,4,5),]
         '''
-        cursor = self.cnx.cursor()
-        cursor.executemany(statement, rows)
-        cursor.close()
+        with closing(self.cnx.cursor()) as cursor:
+            cursor.executemany(statement, rows)
 
     def executemany_chunked(self, statement, rows, chunk_size) -> None:
         '''MySQL execute statement (typically insert) with multiple rows.
@@ -104,11 +111,8 @@ class MysqlHandler():
         :param statement: e.g create table t1 ...; create table t2 ...
         '''
         debug('query: %(statement)s', {'statement':statement})
-        cursor = self.cnx.cursor()
-        result_iterator = cursor.execute(statement, multi=True)
-        results = list(result_iterator)
-        cursor.close()
-        return results
+        with closing(self.cnx.cursor()) as cursor:
+            return list(cursor.execute(statement, multi=True))
 
     def fetchone(self, statement, params:Dict[str, Any]=None) -> Tuple[Any]:
         '''MySQL query (typically select) with one row result expected
@@ -121,11 +125,9 @@ class MysqlHandler():
             params = {}
         debug('statement: %(statement)s', {'statement':statement})
         debug('params: %(params)s', {'params':params})
-        cursor = self.cnx.cursor()
-        cursor.execute(statement, params=params)
-        row = cursor.fetchone()
-        cursor.close()
-        return row
+        with closing(self.cnx.cursor()) as cursor:
+            cursor.execute(statement, params=params)
+            return cursor.fetchone()
 
     def fetchall(self, statement:str, params:Dict[str, Any]=None) -> Rows:
         '''MySQL query (typically select) with many rows expected
@@ -140,11 +142,9 @@ class MysqlHandler():
         debug('params: %(params)s', {'params':params})
         if params is None:
             params = {}
-        cursor = self.cnx.cursor()
-        cursor.execute(statement, params=params)
-        rows = cursor.fetchall()
-        cursor.close()
-        return rows
+        with closing(self.cnx.cursor()) as cursor:
+            cursor.execute(statement, params=params)
+            return cursor.fetchall()
 
     def insert_on_duplicate_key_update(self, table:str, cols:List[str], cols_on_dup:List[str], rows:Rows, on_dup:str='') -> None:
         '''MySQL insert ... on duplicate key update
@@ -196,5 +196,4 @@ class MysqlHandler():
             except connector.Error as ex:
                 ex_last = ex
                 sleep(2 ** i)  # retry
-        raise(ex_last)  # raise exception (exits the for loop)
-
+        raise ex_last  # raise exception (exits the for loop)

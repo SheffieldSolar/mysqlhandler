@@ -2,18 +2,24 @@
 Created on 2 Mar 2015
 
 @author: ph1jb
+
 '''
-from logging import warning
+
 import os
-from os.path import dirname
 import unittest
-from unittest.mock import patch, MagicMock, call
-import yaml
+from logging import warning
+from os.path import dirname
+from unittest.mock import MagicMock, call, patch
 
 from mysql import connector
-from mysql.connector.errorcode import ER_LOCK_WAIT_TIMEOUT, CR_SERVER_LOST, \
-    CR_SERVER_LOST_EXTENDED
+from mysql.connector.errorcode import (CR_SERVER_LOST, CR_SERVER_LOST_EXTENDED,
+                                       ER_LOCK_WAIT_TIMEOUT)
+from mysql.connector.errors import (DatabaseError, DataError, Error,
+                                    IntegrityError, InterfaceError,
+                                    InternalError, NotSupportedError,
+                                    OperationalError, ProgrammingError)
 
+import yaml
 from mysql_handler import MysqlHandler
 
 
@@ -35,7 +41,7 @@ class TestMysqlHandler(unittest.TestCase):
             'time_zone': 'UTC',
             'user': 'database_user_is_not_set',
             }
-        secrets_file = os.path.join(dirname(__file__), '../secrets/test_secrets.yml')
+        secrets_file = os.path.join(dirname(__file__), '../secrets/', 'test_secrets.yml')
         with open(secrets_file, 'r') as fin:
             try:
                 secrets = yaml.safe_load(fin)
@@ -72,11 +78,11 @@ class TestMysqlHandler(unittest.TestCase):
         self.cols_str = ','.join(self.cols)
         statement = f'insert into {self.table} ({self.cols_str}) values (%s,%s,%s)'
         self.rows = [
-                (1, 'Ann', 'Awk',),
-                (2, 'Bob', 'Bash'),
-                (3, 'Cath', 'Curl',),
-                (4, 'Dave', 'Dig'),
-                (5, 'Eve', 'Other'),
+            (1, 'Ann', 'Awk',),
+            (2, 'Bob', 'Bash'),
+            (3, 'Cath', 'Curl',),
+            (4, 'Dave', 'Dig'),
+            (5, 'Eve', 'Other'),
             ]
         # Create MysqlHandler instance afresh for each test
         self.mysql_options = TestMysqlHandler.mysql_options
@@ -106,13 +112,13 @@ class TestMysqlHandler(unittest.TestCase):
 
     def test__init__cnx(self):
         cnx = 1
-        mysql_handler = MysqlHandler(self.mysql_options, cnx=cnx)
-        self.assertEqual(mysql_handler.cnx, cnx)
-        self.assertDictEqual(mysql_handler.mysql_options, self.mysql_options)
+        mh = MysqlHandler(self.mysql_options, cnx=cnx)
+        self.assertEqual(mh.cnx, cnx)
+        self.assertDictEqual(mh.mysql_options, self.mysql_options)
 
     def test_with_mysql_handler(self):
-        with MysqlHandler(self.mysql_options) as mysql_handler:
-            self.assertIsInstance(mysql_handler, MysqlHandler)
+        with MysqlHandler(self.mysql_options) as mh:
+            self.assertIsInstance(mh, MysqlHandler)
 
     # @skip('Fouls up truncate')
     @patch('mysql_handler.MysqlHandler.close')
@@ -205,12 +211,6 @@ class TestMysqlHandler(unittest.TestCase):
         self.assertListEqual(actual, self.rows)
 
     def test_fetchall_data(self):
-        # statement = f'select id, first_name, last_name from {self.table} order by id'
-        # cursor = self.cnx.cursor()
-        # cursor.execute(statement)
-        # rows0 = cursor.fetchall()
-        # cursor.close()
-        # print(rows0)
         statement = f'select id, first_name, last_name from {self.table} where id in(%s,%s,%s,%s,%s) order by id'
         params = (1, 2, 3, 4, 5)  # [(1,), (2,), (3,), (4,), (5,), ]
         actual = self.mysql_handler.fetchall(statement, params=params)
@@ -310,6 +310,38 @@ class TestMysqlHandler(unittest.TestCase):
             self.mysql_handler.retry(mock_method, statement, params, nretries=2)
         calls = [call(statement, params), ] * 2
         mock_method.assert_has_calls(calls)
+
+    def test_close_cursor(self):
+        '''
+        https://dev.mysql.com/doc/connector-python/en/connector-python-api-errors-error.html
+        # Error handling
+        DataError, DatabaseError, Error, IntegrityError, InterfaceError, InternalError,
+        NotSupportedError, OperationalError, ProgrammingError, Warning
+        '''
+        with patch.object(self.mysql_handler.cnx, 'cursor') as cursor_fn:  # pylint: disable:undefined-variable
+            cursor = cursor_fn()
+            cursor.fetchall = MagicMock(return_value=self.rows)
+            statement = f'select * from {self.table}'
+            actual = self.mysql_handler.fetchall(statement)
+            self.assertListEqual(actual, self.rows)
+            cursor.close.assert_called_once_with()
+
+    def test_close_cursor_on_exception(self):
+        '''
+        https://dev.mysql.com/doc/connector-python/en/connector-python-api-errors-error.html
+        # Error handling
+        DataError, DatabaseError, Error, IntegrityError, InterfaceError, InternalError,
+        NotSupportedError, OperationalError, ProgrammingError, Warning
+        '''
+        for ex in (DataError, DatabaseError, Error, IntegrityError, InterfaceError, InternalError,
+                   NotSupportedError, OperationalError, ProgrammingError, Warning):
+            with self.subTest():
+                with patch.object(self.mysql_handler.cnx, 'cursor') as cursor_fn:  # pylint: disable:undefined-variable
+                    cursor = cursor_fn()
+                    cursor.execute = MagicMock(side_effect=ex())
+                    statement = 'select * from XXX'  # non existent table
+                    self.assertRaises(ex, self.mysql_handler.execute, statement)
+                    cursor.close.assert_called_once_with()
 
 
 if __name__ == "__main__":

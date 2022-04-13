@@ -1,4 +1,4 @@
-# Create database and tables for mysql_handler tests
+# Create database and tables for mysqlhandler tests
 # Julian Briggs
 # 22-jan-2022
 
