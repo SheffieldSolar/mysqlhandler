@@ -136,13 +136,12 @@ class MysqlHandler(AbstractContextManager):
         :param rows: list of tuples of data to insert
         :param on_dup: optional on duplicate key update string, e.g. 'first_name=vals.first_name,last_name=UPPER(vals.last_name)'
         '''
-        cols_on_dup = [col for col in cols if not col in keys]
-        on_dup = on_dup or self.on_dup(cols_on_dup)
-        statement = self.insert_on_duplicate_key_update_statement(table, cols, on_dup)
+        statement = self.insert_on_duplicate_key_update_statement(table, cols, keys, on_dup=on_dup)
         debug(statement)
         self.executemany(statement, rows)
 
-    def insert_on_duplicate_key_update_statement(self, table: str, col_names: Tuple[str, ...], on_dup_str: str) -> str:
+    def insert_on_duplicate_key_update_statement(self, table:str, cols:List[str], keys:List[str], on_dup:str='') -> str:
+    # def insert_on_duplicate_key_update_statement(self, table: str, col_names: Tuple[str, ...], on_dup_str: str) -> str:
         '''Insert data into database table.
         Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
         https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
@@ -153,12 +152,15 @@ class MysqlHandler(AbstractContextManager):
         :param col_names: database table column names
         :param on_dup_str: on duplicate key string, e.g. 'a=vals.a,b=vals.b'
         '''
-        col_names_str = ','.join(col_names)
-        placeholders = ','.join(['%s'] * len(col_names))
+        cols_str = ','.join(cols)
+        placeholders = ','.join(['%s'] * len(cols))
+        cols_on_dup = [col for col in cols if not col in keys]
+        on_dup = on_dup or self.on_dup(cols_on_dup)
         if self.mysql_version < '8.0.19':
-            statement = f'insert into {table} ({col_names_str}) values ({placeholders}) on duplicate key update {on_dup_str}'
+            alias_str = ''
         else:
-            statement = f'insert into {table} ({col_names_str}) values ({placeholders}) as vals on duplicate key update {on_dup_str}'
+            alias_str = 'as vals'
+        statement = f'insert into {table} ({cols_str}) values ({placeholders}) {alias_str} on duplicate key update {on_dup}'
         debug('statement %(statement)s', {'statement':statement})
         return statement
 

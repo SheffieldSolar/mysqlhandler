@@ -146,19 +146,21 @@ class TestMysqlHandler(unittest.TestCase):
 
     def test_insert_on_duplicate_key_update_statement(self):
         table = 'mytable'
-        col_names = ['a', 'b', 'c', ]
-        on_dup_str = 'a=vals.a,b=vals.b,c=vals.c'
-        actual = self.mysql_handler.insert_on_duplicate_key_update_statement(table, col_names, on_dup_str)
-        expected = f'insert into {table} (a,b,c) values (%s,%s,%s) as vals on duplicate key update {on_dup_str}'
+        cols = ['a', 'b', 'c', 'd' ]
+        keys = ['a', 'b']
+        on_dup_str = 'c=vals.c,d=vals.d'
+        actual = self.mysql_handler.insert_on_duplicate_key_update_statement(table, cols, keys)
+        expected = f'insert into {table} (a,b,c,d) values (%s,%s,%s,%s) as vals on duplicate key update {on_dup_str}'
         self.assertEqual(actual, expected)
 
     def test_insert_on_duplicate_key_update_statement_pre_mysql8019(self):
         self.mysql_handler.mysql_version = '8.0.18'
         table = 'mytable'
-        col_names = ['a', 'b', 'c', ]
-        on_dup = 'a=VALUES(a),b=VALUES(b),c=VALUES(c)'
-        actual = self.mysql_handler.insert_on_duplicate_key_update_statement(table, col_names, on_dup)
-        expected = f'insert into {table} (a,b,c) values (%s,%s,%s) on duplicate key update {on_dup}'
+        cols = ['a', 'b', 'c', 'd' ]
+        keys = ['a', 'b']
+        on_dup = 'c=VALUES(c),d=VALUES(d)'
+        actual = self.mysql_handler.insert_on_duplicate_key_update_statement(table, cols, keys, on_dup)
+        expected = f'insert into {table} (a,b,c,d) values (%s,%s,%s,%s)  on duplicate key update {on_dup}'
         self.assertEqual(actual, expected)
 
     def test_insert_select_on_duplicate_key_update_statement(self):
@@ -387,7 +389,8 @@ class TestMysqlHandler(unittest.TestCase):
         self.assertEqual(list_arg, 0)
 
     def test_insert_on_duplicate_key_long(self):
-        n = 24
+        # n = 24
+        n = 6
         table = 'reading30compact'
         keys = ['date', 'ss_id']
         vals = range(1, n)
