@@ -17,6 +17,8 @@ and ensures that the cursor object has no reference to its original connection o
 
 https://stackoverflow.com/questions/5669878/when-to-close-cursors-using-mysqldb
 
+Google Cloud SQL defaults to MySQL-8.0.18 (@ 2022-05-19) but can upgrade: gcloud sql instances patch sheffieldsolar --database-version=MYSQL_8_0_28
+
 '''
 from contextlib import AbstractContextManager, closing
 from logging import debug
@@ -58,26 +60,6 @@ class MysqlHandler(AbstractContextManager):
         https://dev.mysql.com/doc/connector-python/en/connector-python-api-mysqlconnection-disconnect.html
         '''
         self.cnx.close()
-
-    def create_on_duplicate_key_update_statement(self, table: str, col_names: Tuple[str, ...], on_dup_str: str) -> str:
-        '''Insert data into database table.
-        Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
-        https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
-
-        :param table: into which to insert data
-        :param rows:
-        :type rows: list of tuples [(0,1,2,),(3,4,5,),]
-        :param col_names: database table column names
-        :param on_dup_str: on duplicate key string, e.g. 'a=vals.a,b=vals.b'
-        '''
-        col_names_str = ','.join(col_names)
-        placeholders = ','.join(['%s'] * len(col_names))
-        if self.mysql_version < '8.0.19':
-            statement = f'insert into {table} ({col_names_str}) values ({placeholders}) on duplicate key update {on_dup_str}'
-        else:
-            statement = f'insert into {table} ({col_names_str}) values ({placeholders}) as vals on duplicate key update {on_dup_str}'
-        debug('statement %(statement)s', {'statement':statement})
-        return statement
 
     def execute(self, statement:str) -> None:
         '''MySQL execute statement (typically insert)
@@ -146,7 +128,7 @@ class MysqlHandler(AbstractContextManager):
             cursor.execute(statement, params=params)
             return cursor.fetchall()
 
-    def insert_on_duplicate_key_update(self, table:str, cols:List[str], cols_on_dup:List[str], rows:Rows, on_dup:str='') -> None:
+    def insert_on_duplicate_key_update(self, table:str, cols:List[str], keys:List[str], rows:Rows, on_dup:str='') -> None:
         '''MySQL insert ... on duplicate key update
         :param table: table to insert into
         :param cols: columns to insert
@@ -154,10 +136,84 @@ class MysqlHandler(AbstractContextManager):
         :param rows: list of tuples of data to insert
         :param on_dup: optional on duplicate key update string, e.g. 'first_name=vals.first_name,last_name=UPPER(vals.last_name)'
         '''
+        cols_on_dup = [col for col in cols if not col in keys]
         on_dup = on_dup or self.on_dup(cols_on_dup)
-        statement = self.create_on_duplicate_key_update_statement(table, cols, on_dup)
+        statement = self.insert_on_duplicate_key_update_statement(table, cols, on_dup)
         debug(statement)
         self.executemany(statement, rows)
+
+    def insert_on_duplicate_key_update_statement(self, table: str, col_names: Tuple[str, ...], on_dup_str: str) -> str:
+        '''Insert data into database table.
+        Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
+        https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
+
+        :param table: into which to insert data
+        :param rows:
+        :type rows: list of tuples [(0,1,2,),(3,4,5,),]
+        :param col_names: database table column names
+        :param on_dup_str: on duplicate key string, e.g. 'a=vals.a,b=vals.b'
+        '''
+        col_names_str = ','.join(col_names)
+        placeholders = ','.join(['%s'] * len(col_names))
+        if self.mysql_version < '8.0.19':
+            statement = f'insert into {table} ({col_names_str}) values ({placeholders}) on duplicate key update {on_dup_str}'
+        else:
+            statement = f'insert into {table} ({col_names_str}) values ({placeholders}) as vals on duplicate key update {on_dup_str}'
+        debug('statement %(statement)s', {'statement':statement})
+        return statement
+
+    def insert_select_on_duplicate_key_update(self, table_from:str, table_into:str, colmap:Dict[str, str], keys:str) -> None:
+        '''Execute insert on duplicate key update statement.
+        Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
+        https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
+        :param table_from: table from which to select data
+        :param table_into: table into which to insert data
+        :param colmap: dict mapping cols in table_from to cols in table_into
+        :param colmap_on_dup: dict mapping cols in table_from to cols in table_into (on duplicate key assignments)
+        :returns: statement eg insert into t1 (d0,d1,d2,d3) select * from (select s0,s1,s2,s3 from t0) as vals(a0,a1,a2,a3) on duplicate key update d2=vals.a2,d3=vals.a3
+        '''
+        debug(table_from)
+        debug(table_into)
+        debug(colmap)
+        debug(keys)
+        statement = MysqlHandler.insert_select_on_duplicate_key_update_statement(table_from, table_into, colmap, keys)
+        debug(statement)
+        self.execute(statement)
+
+    @staticmethod
+    def insert_select_on_duplicate_key_update_statement(table_from:str, table_into:str, colmap:Dict[str, str], keys:str) -> str:
+        '''Create insert on duplicate key update statement.
+        Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
+        https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
+        :param table_from: table from which to select data
+        :param table_into: table into which to insert data
+        :param colmap: dict mapping cols in table_from to cols in table_into
+        :param colmap_on_dup: dict mapping cols in table_from to cols in table_into (on duplicate key assignments)
+        :returns: statement eg insert into t1 (d0,d1,d2,d3) select * from (select s0,s1,s2,s3 from t0) as vals(a0,a1,a2,a3) on duplicate key update d2=vals.a2,d3=vals.a3
+        Google Cloud SQL defaults to MySQL-8.0.18 but can upgrade: gcloud sql instances patch sheffieldsolar --database-version=MYSQL_8_0_28
+        '''
+        debug(table_from)
+        debug(table_into)
+        debug(colmap)
+        debug(keys)
+
+        cols_from = colmap.keys()
+        cols_into = colmap.values()
+
+        col2alias = {col:f'alias{i}' for (i, col) in enumerate(cols_into)}
+        aliases = col2alias.values()
+
+        aliases_str = ','.join(aliases)
+        cols_into_str = ','.join(cols_into)
+        cols_from_str = ','.join(cols_from)
+
+        on_dup = [f'{col_into}=vals.{col2alias[col_into]}' for col_into in cols_into if not col_into in keys]
+        on_dup_str = ','.join(on_dup)
+        statement = (f'insert into {table_into} ({cols_into_str}) select * from '
+                     f'(select {cols_from_str} from {table_from}) as vals({aliases_str}) '
+                     f'on duplicate key update {on_dup_str}')
+        debug('statement %(statement)s', {'statement':statement})
+        return statement
 
     def on_dup(self, col_names: Tuple[str, ...]) -> str:
         '''
@@ -197,3 +253,26 @@ class MysqlHandler(AbstractContextManager):
                 ex_last = ex
                 sleep(2 ** i)  # retry
         raise ex_last  # raise exception (exits the for loop)
+
+    def reset_auto_increment(self, table:str, col:str) -> int:
+        '''Reset autoincrement to next above max.
+        (Dangerous is another process may insert row(s) between select max and set auto_increment.)
+        '''
+        statement = f'select max({col}) from {table}'
+        max_val = self.fetchone(statement)[0]
+        statement = f'alter table {table} auto_increment = {max_val+1}'
+        print(statement)
+        self.execute(statement)
+        statement = f'select auto_increment from information_schema.tables where table_schema = database() and table_name = "{table}"'
+        auto_increment = self.fetchone(statement)[0]
+        return auto_increment
+
+    def truncate(self, table:str, foreign_key_checks:int=1) -> None:
+        '''Truncate table (Disable foreign key checks to allow truncate table if foreign keys point to it)
+        '''
+        statement = (f'SET FOREIGN_KEY_CHECKS = {foreign_key_checks};'  # Set foreign key checks (0 disables, 1 enables)
+                     f'truncate table {table};'
+                     f'SET FOREIGN_KEY_CHECKS = 1;'  # Enable foreign key checks
+                    )
+        self.executemulti(statement)
+

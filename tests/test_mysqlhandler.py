@@ -9,6 +9,8 @@ import os
 import unittest
 from logging import warning
 from os.path import dirname
+from typing import List
+from unittest.case import skip
 from unittest.mock import MagicMock, call, patch
 
 from mysql import connector
@@ -21,6 +23,10 @@ from mysql.connector.errors import (DatabaseError, DataError, Error,
 
 import yaml
 from mysql_handler import MysqlHandler
+
+# pylint: disable=missing-module-docstring
+# pylint: disable=missing-class-docstring
+# pylint: disable=missing-function-docstring
 
 
 class TestMysqlHandler(unittest.TestCase):
@@ -138,21 +144,33 @@ class TestMysqlHandler(unittest.TestCase):
         }
         self.assertRaises(connector.errors.Error, MysqlHandler, mysql_options=mysql_options)
 
-    def test_create_on_duplicate_key_update_statement(self):
+    def test_insert_on_duplicate_key_update_statement(self):
         table = 'mytable'
         col_names = ['a', 'b', 'c', ]
         on_dup_str = 'a=vals.a,b=vals.b,c=vals.c'
-        actual = self.mysql_handler.create_on_duplicate_key_update_statement(table, col_names, on_dup_str)
+        actual = self.mysql_handler.insert_on_duplicate_key_update_statement(table, col_names, on_dup_str)
         expected = f'insert into {table} (a,b,c) values (%s,%s,%s) as vals on duplicate key update {on_dup_str}'
         self.assertEqual(actual, expected)
 
-    def test_create_on_duplicate_key_update_statement_pre_mysql8019(self):
+    def test_insert_on_duplicate_key_update_statement_pre_mysql8019(self):
         self.mysql_handler.mysql_version = '8.0.18'
         table = 'mytable'
         col_names = ['a', 'b', 'c', ]
         on_dup = 'a=VALUES(a),b=VALUES(b),c=VALUES(c)'
-        actual = self.mysql_handler.create_on_duplicate_key_update_statement(table, col_names, on_dup)
+        actual = self.mysql_handler.insert_on_duplicate_key_update_statement(table, col_names, on_dup)
         expected = f'insert into {table} (a,b,c) values (%s,%s,%s) on duplicate key update {on_dup}'
+        self.assertEqual(actual, expected)
+
+    def test_insert_select_on_duplicate_key_update_statement(self):
+        table_from = 'table_from'
+        table_into = 'table_into'
+        colmap = {'col_from0':'col_into0', 'col_from1':'col_into1', 'col_from2':'col_into2', 'col_from3*2':'col_into3', }
+        keys = ['col_into0', 'col_into1', ]
+        actual = self.mysql_handler.insert_select_on_duplicate_key_update_statement(table_from, table_into, colmap, keys)
+        expected = ('insert into table_into (col_into0,col_into1,col_into2,col_into3) '
+                    'select * from (select col_from0,col_from1,col_from2,col_from3*2 from table_from) '
+                    'as vals(alias0,alias1,alias2,alias3) '
+                    'on duplicate key update col_into2=vals.alias2,col_into3=vals.alias3')
         self.assertEqual(actual, expected)
 
     def test_execute(self):
@@ -241,9 +259,9 @@ class TestMysqlHandler(unittest.TestCase):
 
     def test_insert_on_duplicate_key_update(self):
         self.truncate()
-        self.mysql_handler.insert_on_duplicate_key_update(self.table, self.cols, self.cols[1:], self.rows)
+        self.mysql_handler.insert_on_duplicate_key_update(self.table, self.cols, self.cols[:1], self.rows)
         # Re-insert to show that on duplicate key update works
-        self.mysql_handler.insert_on_duplicate_key_update(self.table, self.cols, self.cols[1:], self.rows)
+        self.mysql_handler.insert_on_duplicate_key_update(self.table, self.cols, self.cols[:1], self.rows)
         # Check rows have been inserted
         statement = f'select * from {self.table}'
         rows = self.mysql_handler.fetchall(statement)
@@ -252,9 +270,9 @@ class TestMysqlHandler(unittest.TestCase):
     def test_insert_on_duplicate_key_update_on_dup(self):
         self.truncate()
         on_dup = 'first_name=vals.first_name,last_name=UPPER(vals.last_name)'
-        self.mysql_handler.insert_on_duplicate_key_update(self.table, self.cols, self.cols[1:], self.rows, on_dup=on_dup)
+        self.mysql_handler.insert_on_duplicate_key_update(self.table, self.cols, self.cols[:1], self.rows, on_dup=on_dup)
         # Re-insert to show that on duplicate key update works
-        self.mysql_handler.insert_on_duplicate_key_update(self.table, self.cols, self.cols[1:], self.rows, on_dup=on_dup)
+        self.mysql_handler.insert_on_duplicate_key_update(self.table, self.cols, self.cols[:1], self.rows, on_dup=on_dup)
         # Check rows have been inserted
         statement = f'select * from {self.table}'
         rows = self.mysql_handler.fetchall(statement)
@@ -342,6 +360,42 @@ class TestMysqlHandler(unittest.TestCase):
                     statement = 'select * from XXX'  # non existent table
                     self.assertRaises(ex, self.mysql_handler.execute, statement)
                     cursor.close.assert_called_once_with()
+
+    def test_reset_auto_increment(self):
+        table = 'testtable'
+        col = 'id'
+        statement = f'select max({col}) from {table}'
+        max_val = self.mysql_handler.fetchone(statement)[0]
+        auto_increment = self.mysql_handler.reset_auto_increment(table, col)
+        self.assertEqual(auto_increment, max_val + 1)
+
+    def test_truncate(self):
+        table = 'testtable'
+        self.mysql_handler.truncate(table)
+        statement = f'select * from {table}'
+        rows = self.mysql_handler.fetchall(statement)
+        self.assertListEqual(rows, [])
+
+    def test_type_conf(self):
+
+        def lister(list_arg:List[str]):
+            return list_arg
+
+        list_arg = lister(0)
+        print(type(list_arg))
+        print(list_arg)
+        self.assertEqual(list_arg, 0)
+
+    def test_insert_on_duplicate_key_long(self):
+        n = 24
+        table = 'reading30compact'
+        keys = ['date', 'ss_id']
+        vals = range(1, n)
+        cols = keys + [f't{i}' for i in vals]
+        date = '2022-01-01'
+        ss_id = 1
+        rows = [(date, ss_id, *vals)]
+        self.mysql_handler.insert_on_duplicate_key_update(table, cols, keys, rows)
 
 
 if __name__ == "__main__":
