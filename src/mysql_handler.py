@@ -21,11 +21,13 @@ Google Cloud SQL defaults to MySQL-8.0.18 (@ 2022-05-19) but can upgrade: gcloud
 
 '''
 from contextlib import AbstractContextManager, closing
+from copy import deepcopy
 from logging import debug
 from time import sleep
 from typing import Any, Dict, List, Tuple
 
 from mysql import connector
+
 
 Rows = List[Tuple[Any, ...]]
 
@@ -47,10 +49,12 @@ class MysqlHandler(AbstractContextManager):
     def __init__(self, mysql_options, cnx=None):
         self.cnx = cnx
         self.mysql_options = mysql_options
+        self.mysql_options_redacted=self.mysql_options.copy()
+        self.mysql_options_redacted.update({'password':'REDACTED'})
         if cnx:
             pass
         else:
-            debug('MysqlHandler.__init__.mysql_options: %(mysql_options)s', {'mysql_options':self.mysql_options})
+            debug('MysqlHandler.__init__.mysql_options: %(mysql_options_redacted)s', {'mysql_options_redacted':self.mysql_options_redacted})
             self.cnx = connector.connect(**self.mysql_options)
             self.mysql_version = self.fetchone('SELECT VERSION();')[0]
 

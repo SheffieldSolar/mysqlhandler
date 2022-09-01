@@ -5,14 +5,9 @@ Created on 2 Mar 2015
 
 '''
 
-import os
-import unittest
+from datetime import timezone
+import datetime
 from logging import warning
-from os.path import dirname
-from typing import List
-from unittest.case import skip
-from unittest.mock import MagicMock, call, patch
-
 from mysql import connector
 from mysql.connector.errorcode import (CR_SERVER_LOST, CR_SERVER_LOST_EXTENDED,
                                        ER_LOCK_WAIT_TIMEOUT)
@@ -20,15 +15,20 @@ from mysql.connector.errors import (DatabaseError, DataError, Error,
                                     IntegrityError, InterfaceError,
                                     InternalError, NotSupportedError,
                                     OperationalError, ProgrammingError)
-
+import os
+from os.path import dirname
+from typing import List
+import unittest
+from unittest.case import skip
+from unittest.mock import MagicMock, call, patch
 import yaml
+
 from mysql_handler import MysqlHandler
+
 
 # pylint: disable=missing-module-docstring
 # pylint: disable=missing-class-docstring
 # pylint: disable=missing-function-docstring
-
-
 class TestMysqlHandler(unittest.TestCase):
 
     @classmethod
@@ -400,6 +400,32 @@ class TestMysqlHandler(unittest.TestCase):
         rows = [(date, ss_id, *vals)]
         self.mysql_handler.insert_on_duplicate_key_update(table, cols, keys, rows)
 
+    def test_timestamp_types(self):
+        '''
+        Determining if an Object is Aware or Naive        
+        Objects of the date type are always naive.        
+        An object of type time or datetime may be aware or naive.        
+        A datetime object d is aware if both of the following hold:        
+            d.tzinfo is not None        
+            d.tzinfo.utcoffset(d) does not return None        
+        Otherwise, d is naive.        
+        A time object t is aware if both of the following hold:        
+            t.tzinfo is not None        
+            t.tzinfo.utcoffset(None) does not return None.        
+        Otherwise, t is naive.        
+        The distinction between aware and naive doesn’t apply to timedelta objects.
+        '''
+        statement='select date from reading30compact'
+        (timestamp,) =self.mysql_handler.fetchone(statement)
+        
+        print(timestamp,type(timestamp),timestamp.tzinfo)
+        timestamp_aware=timestamp.astimezone(timezone.utc)
+        print(timestamp_aware,type(timestamp_aware),timestamp_aware.tzinfo)
+        
+        timestamp2:datetime.datetime
+        (timestamp2,) =self.mysql_handler.fetchone(statement)
+        print(timestamp2,type(timestamp2),timestamp2.tzinfo)
+        
 
 if __name__ == "__main__":
     unittest.main()
