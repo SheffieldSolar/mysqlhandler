@@ -24,12 +24,12 @@ from contextlib import AbstractContextManager, closing
 from copy import deepcopy
 from logging import debug
 from time import sleep
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Sequence, Optional
 
-from mysql import connector
+import mysql.connector
 
 
-Rows = List[Tuple[Any, ...]]
+Rows = Sequence[Tuple[Any, ...]]
 
 
 class MysqlHandler(AbstractContextManager):
@@ -47,16 +47,15 @@ class MysqlHandler(AbstractContextManager):
         self.cnx.close()
 
     def __init__(self, mysql_options, cnx=None):
-        self.cnx = cnx
         self.mysql_options = mysql_options
-        self.mysql_options_redacted=self.mysql_options.copy()
-        self.mysql_options_redacted.update({'password':'REDACTED'})
+        self.mysql_options_redacted = self.mysql_options.copy()
+        self.mysql_options_redacted.update({'password': 'REDACTED'})
         if cnx:
-            pass
+            self.cnx = cnx
         else:
-            debug('MysqlHandler.__init__.mysql_options: %(mysql_options_redacted)s', {'mysql_options_redacted':self.mysql_options_redacted})
-            self.cnx = connector.connect(**self.mysql_options)
-            self.mysql_version = self.fetchone('SELECT VERSION();')[0]
+            debug('MysqlHandler.__init__.mysql_options: %(mysql_options_redacted)s', {
+                  'mysql_options_redacted': self.mysql_options_redacted})
+            self.cnx = mysql.connector.connect(**self.mysql_options)
 
     def close(self):
         '''Close database connection.
@@ -65,13 +64,14 @@ class MysqlHandler(AbstractContextManager):
         '''
         self.cnx.close()
 
-    def execute(self, statement:str) -> None:
+    def execute(self, statement: str, params=None) -> None:
         '''MySQL execute statement (typically insert)
         '''
+        params = params or {}
         with closing(self.cnx.cursor()) as cursor:
-            cursor.execute(statement)
+            cursor.execute(statement, params)
 
-    def executemany(self, statement:str, rows:Rows) -> None:
+    def executemany(self, statement: str, rows: Rows) -> None:
         '''MySQL execute statement (typically insert) with multiple rows.
         :param statement: e.g. insert into table t (a,b,c) values(%s,%s,%s)
         :param rows: e.g.: [(0,1,2),(3,4,5),]
@@ -91,16 +91,18 @@ class MysqlHandler(AbstractContextManager):
             i_1 = min((i + chunk_size, len_rows))
             self.executemany(statement, rows[i:i_1])
 
-    def executemulti(self, statement:str):
+    def executemulti(self, statement: str):
         '''MySQL query with multiple statements.
         Use this rarely, perhaps to execute an SQL script to create tables etc.
         :param statement: e.g create table t1 ...; create table t2 ...
         '''
-        debug('query: %(statement)s', {'statement':statement})
+        debug('query: %(statement)s', {'statement': statement})
         with closing(self.cnx.cursor()) as cursor:
-            return list(cursor.execute(statement, multi=True))
+            result = list(cursor.execute(statement, multi=True))
+            cursor.fetchall()
+            return result
 
-    def fetchone(self, statement, params:Dict[str, Any]=None) -> Tuple[Any]:
+    def fetchone(self, statement, params: Optional[Dict[str, Any]]=None) -> Tuple[Any]:
         '''MySQL query (typically select) with one row result expected
          Cannot parameterise table name. Can only parameterise values.
         :param statement: e.g. select * from table t where id = 1
@@ -109,13 +111,13 @@ class MysqlHandler(AbstractContextManager):
         '''
         if params is None:
             params = {}
-        debug('statement: %(statement)s', {'statement':statement})
-        debug('params: %(params)s', {'params':params})
+        debug('statement: %(statement)s', {'statement': statement})
+        debug('params: %(params)s', {'params': params})
         with closing(self.cnx.cursor()) as cursor:
             cursor.execute(statement, params=params)
             return cursor.fetchone()
 
-    def fetchall(self, statement:str, params:Dict[str, Any]=None) -> Rows:
+    def fetchall(self, statement: str, params: Optional[Dict[str, Any]]=None) -> Rows:
         '''MySQL query (typically select) with many rows expected
          (but not so many as to exhaust memory)
          Cannot parameterise table name. Can only parameterise values.
@@ -123,16 +125,16 @@ class MysqlHandler(AbstractContextManager):
         :param params: dict e.g. {'table0':table0,'table1':table1,}
         :return: e.g. [(0,1,2),(3,4,5),]
         '''
-        debug('self.cnx: %(cnx)s', {'cnx':self.cnx})
-        debug('statement: %(statement)s', {'statement':statement})
-        debug('params: %(params)s', {'params':params})
+        debug('self.cnx: %(cnx)s', {'cnx': self.cnx})
+        debug('statement: %(statement)s', {'statement': statement})
+        debug('params: %(params)s', {'params': params})
         if params is None:
             params = {}
         with closing(self.cnx.cursor()) as cursor:
             cursor.execute(statement, params=params)
             return cursor.fetchall()
 
-    def insert_on_duplicate_key_update(self, table:str, cols:List[str], keys:List[str], rows:Rows, on_dup:str='') -> None:
+    def insert_on_duplicate_key_update(self, table: str, cols:  Tuple[str, ...], keys:  Tuple[str, ...], rows: Rows, on_dup: str='') -> None:
         '''MySQL insert ... on duplicate key update
         :param table: table to insert into
         :param cols: columns to insert
@@ -140,12 +142,14 @@ class MysqlHandler(AbstractContextManager):
         :param rows: list of tuples of data to insert
         :param on_dup: optional on duplicate key update string, e.g. 'first_name=vals.first_name,last_name=UPPER(vals.last_name)'
         '''
-        statement = self.insert_on_duplicate_key_update_statement(table, cols, keys, on_dup=on_dup)
+        statement = self.insert_on_duplicate_key_update_statement(
+            table, cols, keys, on_dup=on_dup)
         debug(statement)
         self.executemany(statement, rows)
 
-    def insert_on_duplicate_key_update_statement(self, table:str, cols:List[str], keys:List[str], on_dup:str='') -> str:
-    # def insert_on_duplicate_key_update_statement(self, table: str, col_names: Tuple[str, ...], on_dup_str: str) -> str:
+    def insert_on_duplicate_key_update_statement(self, table: str, cols: Tuple[str, ...], keys: Tuple[str, ...], on_dup: str='') -> str:
+        # def insert_on_duplicate_key_update_statement(self, table: str,
+        # col_names: Tuple[str, ...], on_dup_str: str) -> str:
         '''Insert data into database table.
         Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
         https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
@@ -158,17 +162,17 @@ class MysqlHandler(AbstractContextManager):
         '''
         cols_str = ','.join(cols)
         placeholders = ','.join(['%s'] * len(cols))
-        cols_on_dup = [col for col in cols if not col in keys]
+        cols_on_dup = tuple([col for col in cols if not col in keys])
         on_dup = on_dup or self.on_dup(cols_on_dup)
-        if self.mysql_version < '8.0.19':
-            alias_str = ''
-        else:
-            alias_str = 'as vals'
+        # if self.mysql_version < '8.0.19':
+        #     alias_str = ''
+        # else:
+        alias_str = 'as vals'
         statement = f'insert into {table} ({cols_str}) values ({placeholders}) {alias_str} on duplicate key update {on_dup}'
-        debug('statement %(statement)s', {'statement':statement})
+        debug('statement %(statement)s', {'statement': statement})
         return statement
 
-    def insert_select_on_duplicate_key_update(self, table_from:str, table_into:str, colmap:Dict[str, str], keys:str) -> None:
+    def insert_select_on_duplicate_key_update(self, table_from: str, table_into: str, colmap: Dict[str, str], keys: str) -> None:
         '''Execute insert on duplicate key update statement.
         Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
         https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
@@ -182,12 +186,13 @@ class MysqlHandler(AbstractContextManager):
         debug(table_into)
         debug(colmap)
         debug(keys)
-        statement = MysqlHandler.insert_select_on_duplicate_key_update_statement(table_from, table_into, colmap, keys)
+        statement = MysqlHandler.insert_select_on_duplicate_key_update_statement(
+            table_from, table_into, colmap, keys)
         debug(statement)
         self.execute(statement)
 
     @staticmethod
-    def insert_select_on_duplicate_key_update_statement(table_from:str, table_into:str, colmap:Dict[str, str], keys:str) -> str:
+    def insert_select_on_duplicate_key_update_statement(table_from: str, table_into: str, colmap: Dict[str, str], keys: str) -> str:
         '''Create insert on duplicate key update statement.
         Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
         https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
@@ -206,19 +211,20 @@ class MysqlHandler(AbstractContextManager):
         cols_from = colmap.keys()
         cols_into = colmap.values()
 
-        col2alias = {col:f'alias{i}' for (i, col) in enumerate(cols_into)}
+        col2alias = {col: f'alias{i}' for (i, col) in enumerate(cols_into)}
         aliases = col2alias.values()
 
         aliases_str = ','.join(aliases)
         cols_into_str = ','.join(cols_into)
         cols_from_str = ','.join(cols_from)
 
-        on_dup = [f'{col_into}=vals.{col2alias[col_into]}' for col_into in cols_into if not col_into in keys]
+        on_dup = [
+            f'{col_into}=vals.{col2alias[col_into]}' for col_into in cols_into if not col_into in keys]
         on_dup_str = ','.join(on_dup)
         statement = (f'insert into {table_into} ({cols_into_str}) select * from '
                      f'(select {cols_from_str} from {table_from}) as vals({aliases_str}) '
                      f'on duplicate key update {on_dup_str}')
-        debug('statement %(statement)s', {'statement':statement})
+        debug('statement %(statement)s', {'statement': statement})
         return statement
 
     def on_dup(self, col_names: Tuple[str, ...]) -> str:
@@ -228,17 +234,18 @@ class MysqlHandler(AbstractContextManager):
         :param col_names: database table column names
         :returns: on duplicate key update string
         '''
-        if self.mysql_version < '8.0.19':
-            # pre 8.0.19
-            on_dup_array = [f'{col_name}=VALUES({col_name})' for col_name in col_names]
-        else:
-            # 8.0.19 and after
-            on_dup_array = [f'{col_name}=vals.{col_name}' for col_name in col_names]
+        # if self.mysql_version < '8.0.19':
+        #     # pre 8.0.19
+        #     on_dup_array = [f'{col_name}=values({col_name})' for col_name in col_names]
+        # else:
+        #     # 8.0.19 and after
+        on_dup_array = [
+            f'{col_name}=vals.{col_name}' for col_name in col_names]
         on_dup = ','.join(on_dup_array)
-        debug('on_dup %(on_dup)s', {'on_dup':on_dup})
+        debug('on_dup %(on_dup)s', {'on_dup': on_dup})
         return on_dup
 
-    def retry(self, method, *args, nretries=8, **kwargs):
+    def retry(self, method, *args, base: float=2, nretries: int=8, **kwargs):
         # pylint: disable=unused-argument
         '''Wrapper to retry MySQL queries up to nretries times with exponential back-off
         eg if nretries = 6 (default) retry (on error) after 1, 2, 4, 8, 16, 32, 64, 128 seconds
@@ -250,17 +257,17 @@ class MysqlHandler(AbstractContextManager):
         :returns: whatever the method returns
         :raises connector.Error: if connector.Error persists after all retries
         '''
-        ex_last = None
+        ex_last = mysql.connector.Error('')
         for i in range(nretries):
             try:
                 print(f'retry: i {i}')
                 return method(*args, **kwargs)
-            except connector.Error as ex:
+            except mysql.connector.Error as ex:
                 ex_last = ex
-                sleep(2 ** i)  # retry
+                sleep(base ** i)  # retry
         raise ex_last  # raise exception (exits the for loop)
 
-    def reset_auto_increment(self, table:str, col:str) -> int:
+    def reset_auto_increment(self, table: str, col: str) -> int:
         '''Reset autoincrement to next above max.
         (Dangerous is another process may insert row(s) between select max and set auto_increment.)
         '''
@@ -273,12 +280,11 @@ class MysqlHandler(AbstractContextManager):
         auto_increment = self.fetchone(statement)[0]
         return auto_increment
 
-    def truncate(self, table:str, foreign_key_checks:int=1) -> None:
+    def truncate(self, table: str, foreign_key_checks: int=1) -> None:
         '''Truncate table (Disable foreign key checks to allow truncate table if foreign keys point to it)
         '''
         statement = (f'SET FOREIGN_KEY_CHECKS = {foreign_key_checks};'  # Set foreign key checks (0 disables, 1 enables)
                      f'truncate table {table};'
                      f'SET FOREIGN_KEY_CHECKS = 1;'  # Enable foreign key checks
-                    )
+                     )
         self.executemulti(statement)
-
