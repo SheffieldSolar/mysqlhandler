@@ -26,7 +26,7 @@ from logging import debug
 from time import sleep
 from typing import Any, Dict, List, Tuple, Sequence, Optional
 
-import mysql.connector
+import mysql.connector # type: ignore
 
 
 Rows = Sequence[Tuple[Any, ...]]
