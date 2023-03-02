@@ -66,11 +66,18 @@ class MysqlHandler(AbstractContextManager):
         """
         self.cnx.close()
 
-    def execute(self, statement: str, params=None) -> None:
+    def execute(self, statement: str, params=None, multi=False) -> None:
         """MySQL execute statement (typically insert)"""
         params = params or {}
         with closing(self.cnx.cursor()) as cursor:
-            cursor.execute(statement, params)
+            try:
+                if multi:
+                    list(cursor.execute(statement, multi=True))
+                else:
+                    cursor.execute(statement, params, multi=multi)
+            except DatabaseError as unused:
+                warning("statement %(statement)s", {"statement": statement})
+                raise
 
     def executemany(self, statement: str, rows: Rows) -> None:
         """MySQL execute statement (typically insert) with multiple rows.
@@ -83,29 +90,6 @@ class MysqlHandler(AbstractContextManager):
             except DatabaseError as unused:
                 warning("statement %(statement)s", {"statement": statement})
                 raise
-
-    def executemany_chunked(self, statement, rows, chunk_size) -> None:
-        """MySQL execute statement (typically insert) with multiple rows.
-        Break data into chunks to avoid max packet size errors
-        :param statement: e.g. insert into table t (a,b,c) values(%s,%s,%s)
-        :param rows: e.g.: [(0,1,2),(3,4,5),]
-        :param chunk_size: 123456
-        """
-        len_rows = len(rows)
-        for i in range(0, len_rows, chunk_size):
-            i_1 = min((i + chunk_size, len_rows))
-            self.executemany(statement, rows[i:i_1])
-
-    def executemulti(self, statement: str):
-        """MySQL query with multiple statements.
-        Use this rarely, perhaps to execute an SQL script to create tables etc.
-        :param statement: e.g create table t1 ...; create table t2 ...
-        """
-        debug("query: %(statement)s", {"statement": statement})
-        with closing(self.cnx.cursor()) as cursor:
-            result = list(cursor.execute(statement, multi=True))
-            cursor.fetchall()
-            return result
 
     def fetchone(
         self, statement, params: Optional[Dict[str, Any]] = None
@@ -121,10 +105,19 @@ class MysqlHandler(AbstractContextManager):
         debug("statement: %(statement)s", {"statement": statement})
         debug("params: %(params)s", {"params": params})
         with closing(self.cnx.cursor()) as cursor:
-            cursor.execute(statement, params=params)
-            return cursor.fetchone()
+            try:
+                cursor.execute(statement, params=params)
+                return cursor.fetchone()
+            except DatabaseError as unused:
+                warning("statement %(statement)s", {"statement": statement})
+                raise
 
-    def fetchall(self, statement: str, params: Optional[Dict[str, Any]] = None) -> Rows:
+    def fetchall(
+        self,
+        statement: str,
+        params: Optional[Dict[str, Any]] = None,
+        multi: bool = False,
+    ) -> Rows:
         """MySQL query (typically select) with many rows expected
          (but not so many as to exhaust memory)
          Cannot parameterise table name. Can only parameterise values.
@@ -138,8 +131,12 @@ class MysqlHandler(AbstractContextManager):
         if params is None:
             params = {}
         with closing(self.cnx.cursor()) as cursor:
-            cursor.execute(statement, params=params)
-            return cursor.fetchall()
+            try:
+                cursor.execute(statement, params=params, multi=multi)
+                return cursor.fetchall()
+            except DatabaseError as unused:
+                warning("statement %(statement)s", {"statement": statement})
+                raise
 
     def insert_on_duplicate_key_update(
         self,
@@ -313,4 +310,4 @@ class MysqlHandler(AbstractContextManager):
             f"truncate table {table};"
             f"SET FOREIGN_KEY_CHECKS = 1;"  # Enable foreign key checks
         )
-        self.executemulti(statement)
+        self.execute(statement, multi=True)
