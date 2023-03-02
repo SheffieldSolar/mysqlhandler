@@ -208,7 +208,6 @@ class MysqlHandler(AbstractContextManager):
         table_from: str, table_into: str, colmap: Dict[str, str], keys: str
     ) -> str:
         """Create insert on duplicate key update statement.
-        Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
         https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
         :param table_from: table from which to select data
         :param table_into: table into which to insert data
