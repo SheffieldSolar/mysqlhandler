@@ -35,7 +35,7 @@ Rows = Sequence[Tuple[Any, ...]]
 class MysqlHandler(AbstractContextManager):
 
     """Insert and query database.
-    constructor takes database connection to allow testing with sqlite and running with mysql.
+    constructor takes database connection cnx for testing.
     Create cnx if cnx=None and mysql_options are passed in
     """
 
@@ -74,7 +74,7 @@ class MysqlHandler(AbstractContextManager):
                 if multi:
                     list(cursor.execute(statement, multi=True))
                 else:
-                    cursor.execute(statement, params, multi=multi)
+                    cursor.execute(statement, params, multi=False)
             except DatabaseError as unused:
                 warning("statement %(statement)s", {"statement": statement})
                 raise
@@ -95,9 +95,9 @@ class MysqlHandler(AbstractContextManager):
         self, statement, params: Optional[Dict[str, Any]] = None
     ) -> Tuple[Any]:
         """MySQL query (typically select) with one row result expected
-         Cannot parameterise table name. Can only parameterise values.
+        Can parameterise values but not table name.
         :param statement: e.g. select * from table t where id = 1
-        :param params: dict e.g. {'table0':table0,'table1':table1,}
+        :param params: dict e.g. {'id':id,'timestamp':timestamp,}
         :return: e.g. (0,1,2)
         """
         if params is None:
@@ -120,12 +120,11 @@ class MysqlHandler(AbstractContextManager):
     ) -> Rows:
         """MySQL query (typically select) with many rows expected
          (but not so many as to exhaust memory)
-         Cannot parameterise table name. Can only parameterise values.
+        Can parameterise values but not table name.
         :param statement: e.g. select * from table t
-        :param params: dict e.g. {'table0':table0,'table1':table1,}
+        :param params: dict e.g. {'id':id,'timestamp':timestamp,}
         :return: e.g. [(0,1,2),(3,4,5),]
         """
-        debug("self.cnx: %(cnx)s", {"cnx": self.cnx})
         debug("statement: %(statement)s", {"statement": statement})
         debug("params: %(params)s", {"params": params})
         if params is None:
@@ -175,14 +174,10 @@ class MysqlHandler(AbstractContextManager):
         :param on_dup: on duplicate key string, e.g. 'a=vals.a,b=vals.b'
         """
         cols_str = ",".join(cols)
-        placeholders = ",".join(["%s"] * len(cols))
+        placeholders = ",".join(["%s"] * len(cols))  #'%s,%s,...'
         cols_on_dup = tuple([col for col in cols if not col in keys])
         on_dup = on_dup or self.on_dup(cols_on_dup)
-        # if self.mysql_version < '8.0.19':
-        #     alias_str = ''
-        # else:
-        alias_str = "as vals"
-        statement = f"insert into {table} ({cols_str}) values ({placeholders}) {alias_str} on duplicate key update {on_dup}"
+        statement = f"insert into {table} ({cols_str}) values ({placeholders}) as vals on duplicate key update {on_dup}"
         debug("statement %(statement)s", {"statement": statement})
         return statement
 
@@ -258,41 +253,14 @@ class MysqlHandler(AbstractContextManager):
         :param col_names: database table column names
         :returns: on duplicate key update string
         """
-        # if self.mysql_version < '8.0.19':
-        #     # pre 8.0.19
-        #     on_dup_array = [f'{col_name}=values({col_name})' for col_name in col_names]
-        # else:
-        #     # 8.0.19 and after
         on_dup_array = [f"{col_name}=vals.{col_name}" for col_name in col_names]
         on_dup = ",".join(on_dup_array)
         debug("on_dup %(on_dup)s", {"on_dup": on_dup})
         return on_dup
 
-    def retry(self, method, *args, base: float = 2, nretries: int = 8, **kwargs):
-        # pylint: disable=unused-argument
-        """Wrapper to retry MySQL queries up to nretries times with exponential back-off
-        eg if nretries = 6 (default) retry (on error) after 1, 2, 4, 8, 16, 32, 64, 128 seconds
-        Call this: retry(query, statement, params)
-        :param method: database table column names
-        :param args: positional args to method
-        :param nretries: number of retries
-        :param kwargs: keyword args to method
-        :returns: whatever the method returns
-        :raises connector.Error: if connector.Error persists after all retries
-        """
-        ex_last = mysql.connector.Error("")
-        for i in range(nretries):
-            try:
-                print(f"retry: i {i}")
-                return method(*args, **kwargs)
-            except mysql.connector.Error as ex:
-                ex_last = ex
-                sleep(base**i)  # retry
-        raise ex_last  # raise exception (exits the for loop)
-
     def reset_auto_increment(self, table: str, col: str) -> int:
         """Reset autoincrement to next above max.
-        (Dangerous is another process may insert row(s) between select max and set auto_increment.)
+        (Dangerous as another process may insert row(s) between select max and set auto_increment.)
         """
         statement = f"select max({col}) from {table}"
         max_val = self.fetchone(statement)[0]
