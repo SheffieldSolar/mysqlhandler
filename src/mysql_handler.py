@@ -21,11 +21,12 @@ Google Cloud SQL defaults to MySQL-8.0.18 (@ 2022-05-19) but can upgrade: gcloud
 
 """
 from contextlib import AbstractContextManager, closing
-from logging import debug
+from logging import debug, warning
 from time import sleep
 from typing import Any, Dict, Tuple, Sequence, Optional
 
 import mysql.connector
+from mysql.connector.errors import DatabaseError
 
 
 Rows = Sequence[Tuple[Any, ...]]
@@ -155,7 +156,11 @@ class MysqlHandler(AbstractContextManager):
             table, cols, keys, on_dup=on_dup
         )
         debug(statement)
-        self.executemany(statement, rows)
+        try:
+            self.executemany(statement, rows)
+        except DatabaseError as unused:
+            warning("statement %(statement)s", {"statement": statement})
+            raise
 
     def insert_on_duplicate_key_update_statement(
         self, table: str, cols: Tuple[str, ...], keys: Tuple[str, ...], on_dup: str = ""
