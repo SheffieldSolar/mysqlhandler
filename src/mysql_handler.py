@@ -78,7 +78,11 @@ class MysqlHandler(AbstractContextManager):
         :param rows: e.g.: [(0,1,2),(3,4,5),]
         """
         with closing(self.cnx.cursor()) as cursor:
-            cursor.executemany(statement, rows)
+            try:
+                cursor.executemany(statement, rows)
+            except DatabaseError as unused:
+                warning("statement %(statement)s", {"statement": statement})
+                raise
 
     def executemany_chunked(self, statement, rows, chunk_size) -> None:
         """MySQL execute statement (typically insert) with multiple rows.
@@ -156,11 +160,7 @@ class MysqlHandler(AbstractContextManager):
             table, cols, keys, on_dup=on_dup
         )
         debug(statement)
-        try:
-            self.executemany(statement, rows)
-        except DatabaseError as unused:
-            warning("statement %(statement)s", {"statement": statement})
-            raise
+        self.executemany(statement, rows)
 
     def insert_on_duplicate_key_update_statement(
         self, table: str, cols: Tuple[str, ...], keys: Tuple[str, ...], on_dup: str = ""
