@@ -170,7 +170,6 @@ class MysqlHandler(AbstractContextManager):
         :param table: into which to insert data
         :param cols: columns to insert
         :param keys: keys
-        :param rows: list of tuples [(0,1,2,),(3,4,5,),]
         :param on_dup: on duplicate key string, e.g. 'a=vals.a,b=vals.b'
         """
         cols_str = ",".join(cols)
@@ -190,7 +189,7 @@ class MysqlHandler(AbstractContextManager):
         :param table_from: table from which to select data
         :param table_into: table into which to insert data
         :param colmap: dict mapping cols in table_from to cols in table_into
-        :param colmap_on_dup: dict mapping cols in table_from to cols in table_into (on duplicate key assignments)
+        :param keys: keys
         :returns: statement eg insert into t1 (d0,d1,d2,d3) select * from (select s0,s1,s2,s3 from t0) as vals(a0,a1,a2,a3) on duplicate key update d2=vals.a2,d3=vals.a3
         """
         debug(table_from)
@@ -212,7 +211,7 @@ class MysqlHandler(AbstractContextManager):
         :param table_from: table from which to select data
         :param table_into: table into which to insert data
         :param colmap: dict mapping cols in table_from to cols in table_into
-        :param colmap_on_dup: dict mapping cols in table_from to cols in table_into (on duplicate key assignments)
+        :param keys: keys
         :returns: statement eg insert into t1 (d0,d1,d2,d3) select * from (select s0,s1,s2,s3 from t0) as vals(a0,a1,a2,a3) on duplicate key update d2=vals.a2,d3=vals.a3
         Google Cloud SQL defaults to MySQL-8.0.18 but can upgrade: gcloud sql instances patch sheffieldsolar --database-version=MYSQL_8_0_28
         """
