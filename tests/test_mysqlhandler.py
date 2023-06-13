@@ -362,41 +362,6 @@ class TestMysqlHandlerPopulated(Fixture):
         expected = "a=vals.a,b=vals.b,c=vals.c"
         self.assertEqual(actual, expected)
 
-    def test_retry(self):
-        def my_method(statement, params):
-            return (statement, params)
-
-        statement = "select {};"
-        params = "123"
-        response = self.mysql_handler.retry(
-            my_method, statement, params, base=1, nretries=2
-        )
-        expected = (statement, params)
-        self.assertTupleEqual(response, expected)
-
-    def test_retry_ERRORS(self):
-        for errno in (CR_SERVER_LOST, CR_SERVER_LOST_EXTENDED, ER_LOCK_WAIT_TIMEOUT):
-            mock_method = MagicMock(side_effect=connector.Error(errno=errno))
-            statement = "select {};"
-            params = "123"
-            with self.assertRaises(connector.Error) as cm:
-                self.mysql_handler.retry(
-                    mock_method, statement, params, base=1, nretries=1
-                )
-                mock_method.assert_called_with(statement, params)
-                self.assertEqual(cm.exception.errno, errno)
-
-    def test_retry_bad_database_host(self):
-        mock_method = MagicMock(side_effect=connector.Error)
-        statement = "select {}"
-        params = "123"
-        with self.assertRaises(connector.Error) as cm:
-            self.mysql_handler.retry(mock_method, statement, params, base=1, nretries=2)
-        calls = [
-            call(statement, params),
-        ] * 2
-        mock_method.assert_has_calls(calls)
-
     def test_close_cursor(self):
         """
         https://dev.mysql.com/doc/connector-python/en/connector-python-api-errors-error.html

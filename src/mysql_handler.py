@@ -164,7 +164,7 @@ class MysqlHandler(AbstractContextManager):
         # def insert_on_duplicate_key_update_statement(self, table: str,
         # col_names: Tuple[str, ...], on_dup_str: str) -> str:
         """Insert data into database table.
-        Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
+        Use post MySQL-8.0.19 syntax (use alias vals.X not values(X) for values for): insert ... on duplicate key insert
         https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
 
         :param table: into which to insert data
@@ -246,7 +246,7 @@ class MysqlHandler(AbstractContextManager):
 
     def on_dup(self, col_names: Tuple[str, ...]) -> str:
         """
-        Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
+        Use post MySQL-8.0.19 syntax (use alias vals.X not values(X) for values for): insert ... on duplicate key insert
         https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
         :param col_names: database table column names
         :returns: on duplicate key update string
