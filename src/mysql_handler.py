@@ -21,8 +21,9 @@ Google Cloud SQL defaults to MySQL-8.0.18 (@ 2022-05-19) but can upgrade: gcloud
 
 """
 from contextlib import AbstractContextManager, closing
-from logging import debug, warning
+from logging import debug, warning, critical
 from time import sleep
+import traceback
 from typing import Any, Dict, Tuple, Sequence, Optional
 
 import mysql.connector
@@ -39,6 +40,12 @@ class MysqlHandler(AbstractContextManager):
     Create cnx if cnx=None and mysql_options are passed in
     """
 
+    @staticmethod
+    def redact_mysql_options(mysql_options: Dict) -> Dict:
+        mysql_options_redacted = mysql_options.copy()
+        mysql_options_redacted.update({"password": "REDACTED"})
+        return mysql_options_redacted
+
     def __enter__(self):
         return self
 
@@ -48,8 +55,7 @@ class MysqlHandler(AbstractContextManager):
 
     def __init__(self, mysql_options, cnx=None):
         self.mysql_options = mysql_options
-        self.mysql_options_redacted = self.mysql_options.copy()
-        self.mysql_options_redacted.update({"password": "REDACTED"})
+        self.mysql_options_redacted = MysqlHandler.redact_mysql_options(mysql_options)
         if cnx:
             self.cnx = cnx
         else:
@@ -57,7 +63,18 @@ class MysqlHandler(AbstractContextManager):
                 "MysqlHandler.__init__.mysql_options: %(mysql_options_redacted)s",
                 {"mysql_options_redacted": self.mysql_options_redacted},
             )
-            self.cnx = mysql.connector.connect(**self.mysql_options)
+            try:
+                self.cnx = mysql.connector.connect(**mysql_options)
+            except mysql.connector.Error as ex:
+                critical(
+                    "Database error %(ex)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
+                    {
+                        "ex": ex,
+                        "mysql_options_redacted": self.mysql_options_redacted,
+                        "stack": traceback.format_exc(),
+                    },
+                )
+                raise
 
     def close(self):
         """Close database connection.
