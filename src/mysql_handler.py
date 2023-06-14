@@ -41,6 +41,18 @@ class MysqlHandler(AbstractContextManager):
     """
 
     @staticmethod
+    def override_mysql_options(config):
+        # Override mysql_options with individual options
+        if config.mysql_database:
+            config.mysql_options.update({"database": config.mysql_database})
+        if config.mysql_host:
+            config.mysql_options.update({"host": config.mysql_host})
+        if config.mysql_password:
+            config.mysql_options.update({"password": config.mysql_password})
+        if config.mysql_user:
+            config.mysql_options.update({"user": config.mysql_user})
+
+    @staticmethod
     def redact_mysql_options(mysql_options: Dict) -> Dict:
         mysql_options_redacted = mysql_options.copy()
         mysql_options_redacted.update({"password": "REDACTED"})
