@@ -118,8 +118,8 @@ class MysqlHandler(AbstractContextManager):
             except DatabaseError as ex:
                 ex.add_note(f"statement {statement}")
                 raise
-
             except mysql.connector.Error as ex:
+                # truncate raises this exception. Julian 15-jun-2023
                 ex.add_note(f"statement {statement}")
                 raise
 
