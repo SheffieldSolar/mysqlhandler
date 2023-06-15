@@ -10,6 +10,7 @@ pyyaml = "*"
 [dev-packages]
 pytest = "*"
 mypy = "*"
+types-pyyaml = "*"
 
 [requires]
 python_version = "3.11"

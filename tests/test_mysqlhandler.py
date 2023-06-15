@@ -6,7 +6,7 @@ Created on 2 Mar 2015
 """
 from datetime import timezone
 import datetime
-from logging import warning
+from logging import warning, basicConfig
 import os
 from os.path import dirname
 from typing import List
@@ -520,6 +520,25 @@ class TestMysqlHandlerPopulated(Fixture):
         timestamp2: datetime.datetime
         (timestamp2,) = self.mysql_handler.fetchone(statement)
         print(timestamp2, type(timestamp2), timestamp2.tzinfo)
+
+
+class TestMysqlExceptionHandling(Fixture):
+    """TestMysqlExceptionHandling."""
+
+    def test_context_manager(self):
+        fmt = "%(asctime)s %(module)s %(funcName)s %(lineno)d %(levelname)s %(message)s"
+        basicConfig(format=fmt, level="INFO")
+        msg = "hi"
+        errno = 123
+        with self.assertLogs("root", level="CRITICAL") as cm_log, self.assertRaises(
+            connector.Error
+        ) as cm_ex:
+            with MysqlHandler(self.mysql_options) as mh:
+                raise connector.Error(msg, errno)
+        ex = cm_ex.exception
+        self.assertEqual(ex.msg, msg)
+        self.assertEqual(ex.errno, errno)
+        # self.assertEqual(cm_log.output, ["CRITICAL:root:asdf"]) #TODO fix in pytest: replace asdf with stuff to match object ...
 
 
 if __name__ == "__main__":

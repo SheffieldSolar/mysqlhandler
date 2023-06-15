@@ -22,7 +22,6 @@ Google Cloud SQL defaults to MySQL-8.0.18 (@ 2022-05-19) but can upgrade: gcloud
 """
 from contextlib import AbstractContextManager, closing
 from logging import debug, warning, critical
-from time import sleep
 import traceback
 from typing import Any, Dict, Tuple, Sequence, Optional
 
@@ -61,9 +60,21 @@ class MysqlHandler(AbstractContextManager):
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type, exc_value, exc_tb):
         # pylint: disable=unused-argument
         self.cnx.close()
+        print("Leaving the context...")
+        if isinstance(exc_value, mysql.connector.Error):
+            critical(
+                "Database error %(exc_type)s %(exc_value)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
+                {
+                    "exc_type": exc_type,
+                    "exc_value": exc_value,
+                    "mysql_options_redacted": self.mysql_options_redacted,
+                    "stack": exc_tb,
+                },
+            )
+            return False  # Propagate except
 
     def __init__(self, mysql_options, cnx=None):
         self.mysql_options = mysql_options
