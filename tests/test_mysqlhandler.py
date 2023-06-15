@@ -7,12 +7,15 @@ Created on 2 Mar 2015
 from datetime import timezone
 import datetime
 from logging import warning, basicConfig
+import logging
 import os
 from os.path import dirname
-from typing import List
+from pathlib import Path
+from typing import List, Dict, Any
 import unittest
 from unittest.mock import MagicMock, call, patch
 
+import _mysql_connector
 from mysql import connector
 from mysql.connector.errorcode import (
     CR_SERVER_LOST,
@@ -22,7 +25,6 @@ from mysql.connector.errorcode import (
 from mysql.connector.errors import (
     DatabaseError,
     DataError,
-    Error,
     IntegrityError,
     InterfaceError,
     InternalError,
@@ -30,9 +32,50 @@ from mysql.connector.errors import (
     OperationalError,
     ProgrammingError,
 )
+import pytest
 import yaml
 
 from mysql_handler import MysqlHandler
+
+
+MYSQL_OPTIONS_DEFAULT = {
+    "autocommit": True,
+    "database": "mysql database not set",
+    "host": "mysql host not set",
+    "password": "mysql password not set",
+    "raise_on_warnings": True,
+    "time_zone": "UTC",
+    "user": "mysql user not set",
+}
+
+secrets_file = Path.joinpath(Path(__file__).parent, "..", "secrets", "test_secrets.yml")
+
+
+@pytest.fixture(autouse=True, scope="module")
+def secrets() -> Dict[str, Any]:
+    """Load secrets file.
+    :return: secrets dict
+    """
+    os.environ["loglevel"] = "DEBUG"
+
+    with open(secrets_file, "r") as fin:
+        try:
+            # return yaml.safe_load(fin)
+            return yaml.safe_load(fin)
+        except yaml.YAMLError as ex:
+            warning(ex)
+            raise
+
+
+@pytest.fixture(autouse=True, scope="module")
+def mysql_options(secrets) -> Dict[str, Any]:
+    """Load mysql_options.
+    :return: mysql_options
+    """
+    os.environ["loglevel"] = "DEBUG"
+    mysql_options = MYSQL_OPTIONS_DEFAULT
+    mysql_options.update(secrets["mysql_options"])
+    return mysql_options
 
 
 def setUpModule():
@@ -389,7 +432,7 @@ class TestMysqlHandlerPopulated(Fixture):
         for ex in (
             DataError,
             DatabaseError,
-            Error,
+            connector.errors.Error,
             IntegrityError,
             InterfaceError,
             InternalError,
@@ -522,23 +565,105 @@ class TestMysqlHandlerPopulated(Fixture):
         print(timestamp2, type(timestamp2), timestamp2.tzinfo)
 
 
-class TestMysqlExceptionHandling(Fixture):
-    """TestMysqlExceptionHandling."""
+class TestMysqlExceptionHandling:
+    """TestMysqlExceptionHandling.
+    pytest"""
 
-    def test_context_manager(self):
-        fmt = "%(asctime)s %(module)s %(funcName)s %(lineno)d %(levelname)s %(message)s"
-        basicConfig(format=fmt, level="INFO")
+    def test_context_manager(self, caplog, mysql_options):
+        caplog.set_level(logging.INFO)
         msg = "hi"
         errno = 123
-        with self.assertLogs("root", level="CRITICAL") as cm_log, self.assertRaises(
-            connector.Error
-        ) as cm_ex:
-            with MysqlHandler(self.mysql_options) as mh:
-                raise connector.Error(msg, errno)
-        ex = cm_ex.exception
-        self.assertEqual(ex.msg, msg)
-        self.assertEqual(ex.errno, errno)
-        # self.assertEqual(cm_log.output, ["CRITICAL:root:asdf"]) #TODO fix in pytest: replace asdf with stuff to match object ...
+        error = connector.Error(msg, 123)
+        with pytest.raises(connector.Error, match=msg) as cm_ex:
+            with MysqlHandler(mysql_options):
+                raise connector.Error(msg=msg, errno=errno)
+            # Exception
+            self.assertEqual(cm_ex.type, connector.Error)
+            self.assertEqual(str(cm_ex.value), str(error))
+        # Logging
+        for record in caplog.records:
+            assert record.levelname == "CRITICAL"
+        assert msg in caplog.text
+
+    def test_execute_exception(self, caplog, mysql_options):
+        caplog.set_level(logging.INFO)
+        with pytest.raises(connector.Error) as cm_ex:
+            with MysqlHandler(mysql_options) as mh:
+                statement = "select no_col from no_table"
+                mh.execute(statement)
+            # Exception
+            assert cm_ex.type == connector.Error
+        # Logging
+        for record in caplog.records:
+            assert record.levelname == "CRITICAL"
+            print(record)
+
+    def test_fetchone_exception(self, caplog, mysql_options):
+        caplog.set_level(logging.INFO)
+        with pytest.raises(connector.Error) as cm_ex:
+            with MysqlHandler(mysql_options) as mh:
+                statement = "select no_col from no_table"
+                mh.fetchone(statement)
+            # Exception
+            assert cm_ex.type == connector.Error
+        # Logging
+        for record in caplog.records:
+            assert record.levelname == "CRITICAL"
+            print(record)
+
+    def test_fetchall_exception(self, caplog, mysql_options):
+        caplog.set_level(logging.INFO)
+        with pytest.raises(connector.Error) as cm_ex:
+            with MysqlHandler(mysql_options) as mh:
+                statement = "select no_col from no_table"
+                mh.fetchall(statement)
+            # Exception
+            assert cm_ex.type == connector.Error
+        # Logging
+        for record in caplog.records:
+            assert record.levelname == "CRITICAL"
+            print(record)
+
+    def test_insert_select_on_duplicate_key_update_exception(
+        self, caplog, mysql_options
+    ):
+        caplog.set_level(logging.INFO)
+        table_from = "table_from"
+        table_into = "table_into"
+        colmap = {
+            "col_from0": "col_into0",
+            "col_from1": "col_into1",
+            "col_from2": "col_into2",
+            "col_from3*2": "col_into3",
+        }
+        keys = [
+            "col_into0",
+            "col_into1",
+        ]
+        with pytest.raises(connector.Error) as cm_ex:
+            with MysqlHandler(mysql_options) as mh:
+                actual = mh.insert_on_duplicate_key_update(
+                    table_from, table_into, colmap, keys
+                )
+        # Exception
+        assert cm_ex.type == connector.errors.InterfaceError
+        # Logging
+        for record in caplog.records:
+            assert record.levelname == "CRITICAL"
+            print(record)
+
+    def test_truncate_exception(self, caplog, mysql_options):
+        caplog.set_level(logging.INFO)
+        with pytest.raises(_mysql_connector.MySQLInterfaceError) as cm_ex:
+            with MysqlHandler(mysql_options) as mh:
+                table = "no_table"
+                mh.truncate(table)
+            # Exception
+            assert cm_ex.type == _mysql_connector.MySQLInterfaceError
+        # Logging
+        for record in caplog.records:
+            assert record.levelname == "CRITICAL"
+            print(record)
 
 
 if __name__ == "__main__":

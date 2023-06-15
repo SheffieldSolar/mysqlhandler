@@ -21,12 +21,13 @@ Google Cloud SQL defaults to MySQL-8.0.18 (@ 2022-05-19) but can upgrade: gcloud
 
 """
 from contextlib import AbstractContextManager, closing
-from logging import debug, warning, critical
+from logging import debug, critical
 import traceback
 from typing import Any, Dict, Tuple, Sequence, Optional
 
+import _mysql_connector
 import mysql.connector
-from mysql.connector.errors import DatabaseError
+from mysql.connector.errors import DatabaseError, InterfaceError
 
 
 Rows = Sequence[Tuple[Any, ...]]
@@ -63,7 +64,6 @@ class MysqlHandler(AbstractContextManager):
     def __exit__(self, exc_type, exc_value, exc_tb):
         # pylint: disable=unused-argument
         self.cnx.close()
-        print("Leaving the context...")
         if isinstance(exc_value, mysql.connector.Error):
             critical(
                 "Database error %(exc_type)s %(exc_value)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
@@ -88,7 +88,7 @@ class MysqlHandler(AbstractContextManager):
             )
             try:
                 self.cnx = mysql.connector.connect(**mysql_options)
-            except mysql.connector.Error as ex:
+            except _mysql_connector.MySQLInterfaceError as ex:
                 critical(
                     "Database error %(ex)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
                     {
@@ -115,8 +115,12 @@ class MysqlHandler(AbstractContextManager):
                     list(cursor.execute(statement, multi=True))
                 else:
                     cursor.execute(statement, params, multi=False)
-            except DatabaseError as unused:
-                warning("statement %(statement)s", {"statement": statement})
+            except DatabaseError as ex:
+                ex.add_note(f"statement {statement}")
+                raise
+
+            except mysql.connector.Error as ex:
+                ex.add_note(f"statement {statement}")
                 raise
 
     def executemany(self, statement: str, rows: Rows) -> None:
@@ -127,8 +131,8 @@ class MysqlHandler(AbstractContextManager):
         with closing(self.cnx.cursor()) as cursor:
             try:
                 cursor.executemany(statement, rows)
-            except DatabaseError as unused:
-                warning("statement %(statement)s", {"statement": statement})
+            except DatabaseError as ex:
+                ex.add_note(f"statement {statement}")
                 raise
 
     def fetchone(
@@ -148,8 +152,8 @@ class MysqlHandler(AbstractContextManager):
             try:
                 cursor.execute(statement, params=params)
                 return cursor.fetchone()
-            except DatabaseError as unused:
-                warning("statement %(statement)s", {"statement": statement})
+            except DatabaseError as ex:
+                ex.add_note(f"statement {statement}")
                 raise
 
     def fetchall(
@@ -173,8 +177,8 @@ class MysqlHandler(AbstractContextManager):
             try:
                 cursor.execute(statement, params=params, multi=multi)
                 return cursor.fetchall()
-            except DatabaseError as unused:
-                warning("statement %(statement)s", {"statement": statement})
+            except DatabaseError as ex:
+                ex.add_note(f"statement {statement}")
                 raise
 
     def insert_on_duplicate_key_update(
