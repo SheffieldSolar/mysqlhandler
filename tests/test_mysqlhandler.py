@@ -6,22 +6,17 @@ Created on 2 Mar 2015
 """
 from datetime import timezone
 import datetime
-from logging import warning, basicConfig
+from logging import warning
 import logging
 import os
 from os.path import dirname
 from pathlib import Path
 from typing import List, Dict, Any
 import unittest
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import _mysql_connector
+import _mysql_connector  # type: ignore
 from mysql import connector
-from mysql.connector.errorcode import (
-    CR_SERVER_LOST,
-    CR_SERVER_LOST_EXTENDED,
-    ER_LOCK_WAIT_TIMEOUT,
-)
 from mysql.connector.errors import (
     DatabaseError,
     DataError,
@@ -489,55 +484,6 @@ class TestMysqlHandlerPopulated(Fixture):
         self.mysql_handler.insert_on_duplicate_key_update(table, cols, keys, rows)
         # print(self.mysql_handler.execute('show tables'))
 
-    def test_insert_on_duplicate_key_long_server_ok(self):
-        """Demo that the bug is in mysql-connector not in mysql server.
-        Create a procedure to insert on duplicate key with 30 non-key columns
-        Call it.
-        Note that it executes fast (0.19s)
-        Whereas using the Python mysql-connector, a similar insert ... on duplicate key update
-        takes ~27s
-        Julian 13-oct-2022
-        """
-        statement = """CREATE PROCEDURE if not exists test_insert_on_duplicate_key_update_long()
-        BEGIN
-            insert into test_reading30compact (date,ss_id,t1,t2,t3,t4,t5,t6,t7,t8,t9,t10,t11,t12,t13,t14,t15,t16,t17,t18,t19,t20,t21,t22,t23,t24,t25,t26,t27,t28,t29,t30) 
-            values ('2022-01-01',1,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30) as vals 
-            on duplicate key update 
-            t1=vals.t1,t2=vals.t2,t3=vals.t3,t4=vals.t4,t5=vals.t5,t6=vals.t6,t7=vals.t7,t8=vals.t8,t9=vals.t9,t10=vals.t10,t11=vals.t11,t12=vals.t12,
-            t13=vals.t13,t14=vals.t14,t15=vals.t15,t16=vals.t16,t17=vals.t17,t18=vals.t18,t19=vals.t19,t20=vals.t20,t21=vals.t21,t22=vals.t22,t23=vals.t23,
-            t24=vals.t24,t25=vals.t25,t26=vals.t26,t27=vals.t27,t28=vals.t28,t29=vals.t29,t30=vals.t30;
-        END        
-        """
-        try:
-            self.mysql_handler.execute(statement)
-        except connector.errors.DatabaseError as ex:
-            # CREATE PROCEDURE if not exists emits a warning if the procedure exists.
-            # We have raise_exception_on_warning set in the mysql_connector
-            # So the warning raises an exception
-            # But the procedure is created
-            # So just catch and ignore the exception
-            pass
-        statement = "call test_mysql.test_insert_on_duplicate_key_update_long()"
-        self.mysql_handler.execute(statement)
-
-    def test_insert_on_duplicate_key_statement_long(self):
-        n = 6  # takes ~1ms
-        # n = 24 #takes ~1s
-        # n = 30 #takes ~28s
-        table = "reading30compact"
-        keys = ["date", "ss_id"]
-        vals = range(1, n)
-        cols = keys + [f"t{i}" for i in vals]
-        date = "2022-01-01"
-        ss_id = 1
-        rows = [(date, ss_id, *vals)]
-        print(table, cols, keys, rows)
-        statement = self.mysql_handler.insert_on_duplicate_key_update_statement(
-            table, cols, keys
-        )
-        # print(self.mysql_handler.execute('show tables'))
-        print(statement)
-
     def test_timestamp_types(self):
         """
         Determining if an Object is Aware or Naive
@@ -560,7 +506,6 @@ class TestMysqlHandlerPopulated(Fixture):
         timestamp_aware = timestamp.astimezone(timezone.utc)
         print(timestamp_aware, type(timestamp_aware), timestamp_aware.tzinfo)
 
-        timestamp2: datetime.datetime
         (timestamp2,) = self.mysql_handler.fetchone(statement)
         print(timestamp2, type(timestamp2), timestamp2.tzinfo)
 
@@ -640,17 +585,13 @@ class TestMysqlExceptionHandling:
             "col_into0",
             "col_into1",
         ]
-        with pytest.raises(connector.Error) as cm_ex:
-            with MysqlHandler(mysql_options) as mh:
-                actual = mh.insert_on_duplicate_key_update(
-                    table_from, table_into, colmap, keys
-                )
+        with pytest.raises(connector.Error) as cm_ex, MysqlHandler(mysql_options) as mh:
+            mh.insert_on_duplicate_key_update(table_from, table_into, colmap, keys)
         # Exception
         assert cm_ex.type == connector.errors.InterfaceError
         # Logging
         for record in caplog.records:
             assert record.levelname == "CRITICAL"
-            print(record)
 
     def test_truncate_exception(self, caplog, mysql_options):
         caplog.set_level(logging.INFO)

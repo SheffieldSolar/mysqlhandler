@@ -25,9 +25,9 @@ from logging import debug, critical
 import traceback
 from typing import Any, Dict, Tuple, Sequence, Optional
 
-import _mysql_connector
+import _mysql_connector  # type: ignore
 import mysql.connector
-from mysql.connector.errors import DatabaseError, InterfaceError
+from mysql.connector.errors import DatabaseError
 
 
 Rows = Sequence[Tuple[Any, ...]]
