@@ -306,12 +306,3 @@ class MysqlHandler(AbstractContextManager):
         statement = f'select auto_increment from information_schema.tables where table_schema = database() and table_name = "{table}"'
         auto_increment = self.fetchone(statement)[0]
         return auto_increment
-
-    def truncate(self, table: str, foreign_key_checks: int = 1) -> None:
-        """Truncate table (Disable foreign key checks to allow truncate table if foreign keys point to it)"""
-        statement = (
-            f"SET FOREIGN_KEY_CHECKS = {foreign_key_checks};"  # Set foreign key checks (0 disables, 1 enables)
-            f"truncate table {table};"
-            f"SET FOREIGN_KEY_CHECKS = 1;"  # Enable foreign key checks
-        )
-        self.execute(statement, multi=True)

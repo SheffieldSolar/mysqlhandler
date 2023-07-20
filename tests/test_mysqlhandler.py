@@ -175,6 +175,15 @@ class Fixture(unittest.TestCase):
         ]
         self.table = TABLE
 
+    def truncate(self, table: str, foreign_key_checks: int = 1) -> None:
+        """Truncate table (Disable foreign key checks to allow truncate table if foreign keys point to it)"""
+        statement = (
+            f"SET FOREIGN_KEY_CHECKS = {foreign_key_checks};"  # Set foreign key checks (0 disables, 1 enables)
+            f"truncate table {table};"
+            f"SET FOREIGN_KEY_CHECKS = 1;"  # Enable foreign key checks
+        )
+        self.mysql_handler.execute(statement, multi=True)
+
 
 # pylint: disable=missing-module-docstring
 # pylint: disable=missing-class-docstring
@@ -215,7 +224,7 @@ class TestMysqlHandlerTruncated(Fixture):
 
     def setUp(self):
         super().setUp()
-        self.mysql_handler.truncate(self.table)
+        self.truncate(self.table)
 
     def test_execute(self):
         statement = f'insert into {self.table} (first_name,last_name) values("A","B")'
@@ -228,7 +237,6 @@ class TestMysqlHandlerTruncated(Fixture):
         self.assertTupleEqual(row, expected)
 
     def test_executemany(self):
-        self.mysql_handler.truncate(self.table)
         statement = (
             f"insert into {self.table} (id, first_name, last_name) values (%s,%s,%s)"
         )
@@ -239,7 +247,6 @@ class TestMysqlHandlerTruncated(Fixture):
         self.assertListEqual(rows, self.rows)
 
     def test_executemulti(self):
-        self.mysql_handler.truncate(self.table)
         statements = (
             f'insert into {self.table} (first_name,last_name) values("A","B");'
             f'insert into {self.table} (first_name,last_name) values("C","D")'
@@ -260,7 +267,7 @@ class TestMysqlHandlerPopulated(Fixture):
 
     def setUp(self):
         super().setUp()
-        self.mysql_handler.truncate(self.table)
+        self.truncate(self.table)
         # Populate table
         self.cols = ("id", "first_name", "last_name")
         self.cols_str = ",".join(self.cols)
@@ -453,13 +460,6 @@ class TestMysqlHandlerPopulated(Fixture):
     #     auto_increment = self.mysql_handler.reset_auto_increment(table, col)
     #     self.assertEqual(auto_increment, max_val + 1)
 
-    def test_truncate(self):
-        table = "testtable"
-        self.mysql_handler.truncate(table)
-        statement = f"select * from {table}"
-        rows = self.mysql_handler.fetchall(statement)
-        self.assertListEqual(rows, [])
-
     def test_type_conf(self):
         def lister(list_arg: List[str]):
             return list_arg
@@ -591,19 +591,6 @@ class TestMysqlExceptionHandling:
         # Logging
         for record in caplog.records:
             assert record.levelname == "CRITICAL"
-
-    def test_truncate_exception(self, caplog, mysql_options):
-        caplog.set_level(logging.INFO)
-        with pytest.raises(Error) as cm_ex:
-            with MysqlHandler(mysql_options) as mh:
-                table = "no_table"
-                mh.truncate(table)
-            # Exception
-            assert cm_ex.type == Error
-        # Logging
-        for record in caplog.records:
-            assert record.levelname == "CRITICAL"
-            print(record)
 
 
 if __name__ == "__main__":
