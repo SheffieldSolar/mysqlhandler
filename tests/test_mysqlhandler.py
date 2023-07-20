@@ -15,11 +15,11 @@ from typing import List, Dict, Any
 import unittest
 from unittest.mock import MagicMock, patch
 
-import _mysql_connector  # type: ignore
-from mysql import connector
+import mysql.connector
 from mysql.connector.errors import (
     DatabaseError,
     DataError,
+    Error,
     IntegrityError,
     InterfaceError,
     InternalError,
@@ -33,6 +33,7 @@ import yaml
 from mysql_handler import MysqlHandler
 
 
+# import _mysql_connector  # type: ignore
 MYSQL_OPTIONS_DEFAULT = {
     "autocommit": True,
     "database": "mysql database not set",
@@ -96,7 +97,7 @@ def setUpModule():
         except yaml.YAMLError as ex:
             warning(ex)
     MYSQL_OPTIONS.update(secrets.get("mysql_options"))
-    cnx = connector.connect(**MYSQL_OPTIONS)
+    cnx = mysql.connector.connect(**MYSQL_OPTIONS)
     CURSOR = cnx.cursor()
     TABLE = "testtable"
     statement = f"""CREATE TEMPORARY TABLE if not exists {TABLE} (
@@ -187,7 +188,7 @@ class TestMysqlHandlerInit(Fixture):
         super().setUp()
 
     def test__init__cnx(self):
-        cnx = connector.connect(**self.mysql_options)
+        cnx = mysql.connector.connect(**self.mysql_options)
         mh = MysqlHandler(self.mysql_options, cnx=cnx)
         self.assertEqual(mh.cnx, cnx)
         self.assertDictEqual(mh.mysql_options, self.mysql_options)
@@ -203,9 +204,7 @@ class TestMysqlHandlerInit(Fixture):
             "password": "mysql password not set",
             "user": "mysql user not set",
         }
-        self.assertRaises(
-            connector.errors.Error, MysqlHandler, mysql_options=self.mysql_options
-        )
+        self.assertRaises(Error, MysqlHandler, mysql_options=self.mysql_options)
 
 
 # pylint: disable=missing-function-docstring
@@ -326,7 +325,7 @@ class TestMysqlHandlerPopulated(Fixture):
         )
         params = {"table": self.table}
         self.assertRaises(
-            connector.errors.ProgrammingError,
+            ProgrammingError,
             self.mysql_handler.fetchone,
             statement,
             params=params,
@@ -427,7 +426,7 @@ class TestMysqlHandlerPopulated(Fixture):
         for ex in (
             DataError,
             DatabaseError,
-            connector.errors.Error,
+            Error,
             IntegrityError,
             InterfaceError,
             InternalError,
@@ -518,12 +517,12 @@ class TestMysqlExceptionHandling:
         caplog.set_level(logging.INFO)
         msg = "hi"
         errno = 123
-        error = connector.Error(msg, 123)
-        with pytest.raises(connector.Error, match=msg) as cm_ex:
+        error = Error(msg, 123)
+        with pytest.raises(Error, match=msg) as cm_ex:
             with MysqlHandler(mysql_options):
-                raise connector.Error(msg=msg, errno=errno)
+                raise Error(msg=msg, errno=errno)
             # Exception
-            self.assertEqual(cm_ex.type, connector.Error)
+            self.assertEqual(cm_ex.type, Error)
             self.assertEqual(str(cm_ex.value), str(error))
         # Logging
         for record in caplog.records:
@@ -532,12 +531,12 @@ class TestMysqlExceptionHandling:
 
     def test_execute_exception(self, caplog, mysql_options):
         caplog.set_level(logging.INFO)
-        with pytest.raises(connector.Error) as cm_ex:
+        with pytest.raises(Error) as cm_ex:
             with MysqlHandler(mysql_options) as mh:
                 statement = "select no_col from no_table"
                 mh.execute(statement)
             # Exception
-            assert cm_ex.type == connector.Error
+            assert cm_ex.type == Error
         # Logging
         for record in caplog.records:
             assert record.levelname == "CRITICAL"
@@ -545,12 +544,12 @@ class TestMysqlExceptionHandling:
 
     def test_fetchone_exception(self, caplog, mysql_options):
         caplog.set_level(logging.INFO)
-        with pytest.raises(connector.Error) as cm_ex:
+        with pytest.raises(Error) as cm_ex:
             with MysqlHandler(mysql_options) as mh:
                 statement = "select no_col from no_table"
                 mh.fetchone(statement)
             # Exception
-            assert cm_ex.type == connector.Error
+            assert cm_ex.type == Error
         # Logging
         for record in caplog.records:
             assert record.levelname == "CRITICAL"
@@ -558,12 +557,12 @@ class TestMysqlExceptionHandling:
 
     def test_fetchall_exception(self, caplog, mysql_options):
         caplog.set_level(logging.INFO)
-        with pytest.raises(connector.Error) as cm_ex:
+        with pytest.raises(Error) as cm_ex:
             with MysqlHandler(mysql_options) as mh:
                 statement = "select no_col from no_table"
                 mh.fetchall(statement)
             # Exception
-            assert cm_ex.type == connector.Error
+            assert cm_ex.type == Error
         # Logging
         for record in caplog.records:
             assert record.levelname == "CRITICAL"
@@ -585,22 +584,22 @@ class TestMysqlExceptionHandling:
             "col_into0",
             "col_into1",
         ]
-        with pytest.raises(connector.Error) as cm_ex, MysqlHandler(mysql_options) as mh:
+        with pytest.raises(Error) as cm_ex, MysqlHandler(mysql_options) as mh:
             mh.insert_on_duplicate_key_update(table_from, table_into, colmap, keys)
         # Exception
-        assert cm_ex.type == connector.errors.InterfaceError
+        assert cm_ex.type == InterfaceError
         # Logging
         for record in caplog.records:
             assert record.levelname == "CRITICAL"
 
     def test_truncate_exception(self, caplog, mysql_options):
         caplog.set_level(logging.INFO)
-        with pytest.raises(_mysql_connector.MySQLInterfaceError) as cm_ex:
+        with pytest.raises(Error) as cm_ex:
             with MysqlHandler(mysql_options) as mh:
                 table = "no_table"
                 mh.truncate(table)
             # Exception
-            assert cm_ex.type == _mysql_connector.MySQLInterfaceError
+            assert cm_ex.type == Error
         # Logging
         for record in caplog.records:
             assert record.levelname == "CRITICAL"

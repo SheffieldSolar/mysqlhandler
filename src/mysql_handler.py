@@ -25,9 +25,7 @@ from logging import debug, critical
 import traceback
 from typing import Any, Dict, Tuple, Sequence, Optional
 
-import _mysql_connector  # type: ignore
-import mysql.connector
-from mysql.connector.errors import DatabaseError
+import mysql.connector.errors
 
 
 Rows = Sequence[Tuple[Any, ...]]
@@ -64,7 +62,7 @@ class MysqlHandler(AbstractContextManager):
     def __exit__(self, exc_type, exc_value, exc_tb):
         # pylint: disable=unused-argument
         self.cnx.close()
-        if isinstance(exc_value, mysql.connector.Error):
+        if isinstance(exc_value, mysql.connector.errors.Error):
             critical(
                 "Database error %(exc_type)s %(exc_value)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
                 {
@@ -88,11 +86,11 @@ class MysqlHandler(AbstractContextManager):
             )
             try:
                 self.cnx = mysql.connector.connect(**mysql_options)
-            except _mysql_connector.MySQLInterfaceError as ex:
+            except mysql.connector.errors.Error as err:
                 critical(
-                    "Database error %(ex)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
+                    "Database error %(err)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
                     {
-                        "ex": ex,
+                        "err": err,
                         "mysql_options_redacted": self.mysql_options_redacted,
                         "stack": traceback.format_exc(),
                     },
@@ -115,12 +113,8 @@ class MysqlHandler(AbstractContextManager):
                     list(cursor.execute(statement, multi=True))
                 else:
                     cursor.execute(statement, params, multi=False)
-            except DatabaseError as ex:
-                ex.add_note(f"statement {statement}")
-                raise
-            except mysql.connector.Error as ex:
-                # truncate raises this exception. Julian 15-jun-2023
-                ex.add_note(f"statement {statement}")
+            except mysql.connector.errors.Error as err:
+                err.add_note(f"statement {statement}")
                 raise
 
     def executemany(self, statement: str, rows: Rows) -> None:
@@ -131,8 +125,8 @@ class MysqlHandler(AbstractContextManager):
         with closing(self.cnx.cursor()) as cursor:
             try:
                 cursor.executemany(statement, rows)
-            except DatabaseError as ex:
-                ex.add_note(f"statement {statement}")
+            except mysql.connector.errors.Error as err:
+                err.add_note(f"statement {statement}")
                 raise
 
     def fetchone(
@@ -152,8 +146,8 @@ class MysqlHandler(AbstractContextManager):
             try:
                 cursor.execute(statement, params=params)
                 return cursor.fetchone()
-            except DatabaseError as ex:
-                ex.add_note(f"statement {statement}")
+            except mysql.connector.errors.Error as err:
+                err.add_note(f"statement {statement}")
                 raise
 
     def fetchall(
@@ -177,8 +171,8 @@ class MysqlHandler(AbstractContextManager):
             try:
                 cursor.execute(statement, params=params, multi=multi)
                 return cursor.fetchall()
-            except DatabaseError as ex:
-                ex.add_note(f"statement {statement}")
+            except mysql.connector.errors.Error as err:
+                err.add_note(f"statement {statement}")
                 raise
 
     def insert_on_duplicate_key_update(
