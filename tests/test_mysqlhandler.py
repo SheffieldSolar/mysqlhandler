@@ -5,17 +5,17 @@ Created on 2 Mar 2015
 
 """
 from datetime import timezone
-import datetime
 from logging import warning
-import logging
-import os
 from os.path import dirname
 from pathlib import Path
 from typing import List, Dict, Any
-import unittest
 from unittest.mock import MagicMock, patch
+import logging
+import os
+import pytest
+import unittest
 
-import mysql.connector
+from mysql import connector
 from mysql.connector.errors import (
     DatabaseError,
     DataError,
@@ -27,13 +27,11 @@ from mysql.connector.errors import (
     OperationalError,
     ProgrammingError,
 )
-import pytest
 import yaml
 
 from mysql_handler import MysqlHandler
 
 
-# import _mysql_connector  # type: ignore
 MYSQL_OPTIONS_DEFAULT = {
     "autocommit": True,
     "database": "mysql database not set",
@@ -97,7 +95,7 @@ def setUpModule():
         except yaml.YAMLError as ex:
             warning(ex)
     MYSQL_OPTIONS.update(secrets.get("mysql_options"))
-    cnx = mysql.connector.connect(**MYSQL_OPTIONS)
+    cnx = connector.connect(**MYSQL_OPTIONS)
     CURSOR = cnx.cursor()
     TABLE = "testtable"
     statement = f"""CREATE TEMPORARY TABLE if not exists {TABLE} (
@@ -197,7 +195,7 @@ class TestMysqlHandlerInit(Fixture):
         super().setUp()
 
     def test__init__cnx(self):
-        cnx = mysql.connector.connect(**self.mysql_options)
+        cnx = connector.connect(**self.mysql_options)
         mh = MysqlHandler(self.mysql_options, cnx=cnx)
         self.assertEqual(mh.cnx, cnx)
         self.assertDictEqual(mh.mysql_options, self.mysql_options)

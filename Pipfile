@@ -10,10 +10,10 @@ pyyaml = "*"
 [dev-packages]
 pytest = "*"
 mypy = "*"
-types-pyyaml = "*"
-unittest2pytest = "*"
 pytest-mock = "*"
 pytest-cov = "*"
+types-pyyaml = "*"
+unittest2pytest = "*"
 
 [requires]
-python_version = "3.11"
+python_version = "3.12"

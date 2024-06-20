@@ -22,10 +22,10 @@ Google Cloud SQL defaults to MySQL-8.0.18 (@ 2022-05-19) but can upgrade: gcloud
 """
 from contextlib import AbstractContextManager, closing
 from logging import debug, critical
+from typing import Any, Dict, Tuple, Sequence, Optional, List
 import traceback
-from typing import Any, Dict, Tuple, Sequence, Optional
 
-import mysql.connector.errors
+from mysql import connector
 
 
 Rows = Sequence[Tuple[Any, ...]]
@@ -62,8 +62,16 @@ class MysqlHandler(AbstractContextManager):
     def __exit__(self, exc_type, exc_value, exc_tb):
         # pylint: disable=unused-argument
         self.cnx.close()
-        if isinstance(exc_value, mysql.connector.errors.Error):
+        if isinstance(exc_value, connector.errors.Error):
             critical(
+                "Database error %(exc_type)s %(exc_value)s mysql_options_redacted %(mysql_options_redacted)s",
+                {
+                    "exc_type": exc_type,
+                    "exc_value": exc_value,
+                    "mysql_options_redacted": self.mysql_options_redacted,
+                },
+            )
+            debug(
                 "Database error %(exc_type)s %(exc_value)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
                 {
                     "exc_type": exc_type,
@@ -85,8 +93,8 @@ class MysqlHandler(AbstractContextManager):
                 {"mysql_options_redacted": self.mysql_options_redacted},
             )
             try:
-                self.cnx = mysql.connector.connect(**mysql_options)
-            except mysql.connector.errors.Error as err:
+                self.cnx = connector.connect(**mysql_options)
+            except connector.errors.Error as err:
                 critical(
                     "Database error %(err)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
                     {
@@ -113,7 +121,7 @@ class MysqlHandler(AbstractContextManager):
                     list(cursor.execute(statement, multi=True))
                 else:
                     cursor.execute(statement, params, multi=False)
-            except mysql.connector.errors.Error as err:
+            except connector.errors.Error as err:
                 err.add_note(f"statement {statement}")
                 raise
 
@@ -125,7 +133,7 @@ class MysqlHandler(AbstractContextManager):
         with closing(self.cnx.cursor()) as cursor:
             try:
                 cursor.executemany(statement, rows)
-            except mysql.connector.errors.Error as err:
+            except connector.errors.Error as err:
                 err.add_note(f"statement {statement}")
                 raise
 
@@ -146,7 +154,7 @@ class MysqlHandler(AbstractContextManager):
             try:
                 cursor.execute(statement, params=params)
                 return cursor.fetchone()
-            except mysql.connector.errors.Error as err:
+            except connector.errors.Error as err:
                 err.add_note(f"statement {statement}")
                 raise
 
@@ -155,7 +163,8 @@ class MysqlHandler(AbstractContextManager):
         statement: str,
         params: Optional[Dict[str, Any]] = None,
         multi: bool = False,
-    ) -> Rows:
+        dictionary: bool = False,
+    ) -> Rows | List[Dict[str, Any]]:
         """MySQL query (typically select) with many rows expected
          (but not so many as to exhaust memory)
         Can parameterise values but not table name.
@@ -167,11 +176,11 @@ class MysqlHandler(AbstractContextManager):
         debug("params: %(params)s", {"params": params})
         if params is None:
             params = {}
-        with closing(self.cnx.cursor()) as cursor:
+        with closing(self.cnx.cursor(dictionary=dictionary)) as cursor:
             try:
                 cursor.execute(statement, params=params, multi=multi)
                 return cursor.fetchall()
-            except mysql.connector.errors.Error as err:
+            except connector.errors.Error as err:
                 err.add_note(f"statement {statement}")
                 raise
 
