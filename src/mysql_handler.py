@@ -20,19 +20,25 @@ https://stackoverflow.com/questions/5669878/when-to-close-cursors-using-mysqldb
 Google Cloud SQL defaults to MySQL-8.0.18 (@ 2022-05-19) but can upgrade: gcloud sql instances patch sheffieldsolar --database-version=MYSQL_8_0_28
 
 """
+
 from contextlib import AbstractContextManager, closing
-from logging import debug, critical
-from typing import Any, Dict, Tuple, Sequence, Optional, List
+import logging
 import traceback
+from typing import Any, Dict, Tuple, Sequence, Optional, List
 
 from mysql import connector
 
+
+# Logging
+logger = logging.getLogger(__name__)
+fmt = "%(asctime)s %(module)s %(funcName)s %(lineno)d %(levelname)s %(message)s"
+# Ignored if logging.basicConfig has already been called
+logging.basicConfig(format=fmt)
 
 Rows = Sequence[Tuple[Any, ...]]
 
 
 class MysqlHandler(AbstractContextManager):
-
     """Insert and query database.
     constructor takes database connection cnx for testing.
     Create cnx if cnx=None and mysql_options are passed in
@@ -63,7 +69,7 @@ class MysqlHandler(AbstractContextManager):
         # pylint: disable=unused-argument
         self.cnx.close()
         if isinstance(exc_value, connector.errors.Error):
-            critical(
+            logger.critical(
                 "Database error %(exc_type)s %(exc_value)s mysql_options_redacted %(mysql_options_redacted)s",
                 {
                     "exc_type": exc_type,
@@ -71,7 +77,7 @@ class MysqlHandler(AbstractContextManager):
                     "mysql_options_redacted": self.mysql_options_redacted,
                 },
             )
-            debug(
+            logger.debug(
                 "Database error %(exc_type)s %(exc_value)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
                 {
                     "exc_type": exc_type,
@@ -88,14 +94,14 @@ class MysqlHandler(AbstractContextManager):
         if cnx:
             self.cnx = cnx
         else:
-            debug(
+            logger.debug(
                 "MysqlHandler.__init__.mysql_options: %(mysql_options_redacted)s",
                 {"mysql_options_redacted": self.mysql_options_redacted},
             )
             try:
                 self.cnx = connector.connect(**mysql_options)
             except connector.errors.Error as err:
-                critical(
+                logger.critical(
                     "Database error %(err)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
                     {
                         "err": err,
@@ -148,8 +154,8 @@ class MysqlHandler(AbstractContextManager):
         """
         if params is None:
             params = {}
-        debug("statement: %(statement)s", {"statement": statement})
-        debug("params: %(params)s", {"params": params})
+        logger.debug("statement: %(statement)s", {"statement": statement})
+        logger.debug("params: %(params)s", {"params": params})
         with closing(self.cnx.cursor()) as cursor:
             try:
                 cursor.execute(statement, params=params)
@@ -172,8 +178,8 @@ class MysqlHandler(AbstractContextManager):
         :param params: dict e.g. {'id':id,'timestamp':timestamp,}
         :return: e.g. [(0,1,2),(3,4,5),]
         """
-        debug("statement: %(statement)s", {"statement": statement})
-        debug("params: %(params)s", {"params": params})
+        logger.debug("statement: %(statement)s", {"statement": statement})
+        logger.debug("params: %(params)s", {"params": params})
         if params is None:
             params = {}
         with closing(self.cnx.cursor(dictionary=dictionary)) as cursor:
@@ -202,7 +208,7 @@ class MysqlHandler(AbstractContextManager):
         statement = self.insert_on_duplicate_key_update_statement(
             table, cols, keys, on_dup=on_dup
         )
-        debug(statement)
+        logger.debug(statement)
         self.executemany(statement, rows)
 
     def insert_on_duplicate_key_update_statement(
@@ -224,7 +230,7 @@ class MysqlHandler(AbstractContextManager):
         cols_on_dup = tuple([col for col in cols if not col in keys])
         on_dup = on_dup or self.on_dup(cols_on_dup)
         statement = f"insert into {table} ({cols_str}) values ({placeholders}) as vals on duplicate key update {on_dup}"
-        debug("statement %(statement)s", {"statement": statement})
+        logger.debug("statement %(statement)s", {"statement": statement})
         return statement
 
     def insert_select_on_duplicate_key_update(
@@ -239,14 +245,14 @@ class MysqlHandler(AbstractContextManager):
         :param keys: keys
         :returns: statement eg insert into t1 (d0,d1,d2,d3) select * from (select s0,s1,s2,s3 from t0) as vals(a0,a1,a2,a3) on duplicate key update d2=vals.a2,d3=vals.a3
         """
-        debug(table_from)
-        debug(table_into)
-        debug(colmap)
-        debug(keys)
+        logger.debug(table_from)
+        logger.debug(table_into)
+        logger.debug(colmap)
+        logger.debug(keys)
         statement = MysqlHandler.insert_select_on_duplicate_key_update_statement(
             table_from, table_into, colmap, keys
         )
-        debug(statement)
+        logger.debug(statement)
         self.execute(statement)
 
     @staticmethod
@@ -262,10 +268,10 @@ class MysqlHandler(AbstractContextManager):
         :returns: statement eg insert into t1 (d0,d1,d2,d3) select * from (select s0,s1,s2,s3 from t0) as vals(a0,a1,a2,a3) on duplicate key update d2=vals.a2,d3=vals.a3
         Google Cloud SQL defaults to MySQL-8.0.18 but can upgrade: gcloud sql instances patch sheffieldsolar --database-version=MYSQL_8_0_28
         """
-        debug(table_from)
-        debug(table_into)
-        debug(colmap)
-        debug(keys)
+        logger.debug(table_from)
+        logger.debug(table_into)
+        logger.debug(colmap)
+        logger.debug(keys)
 
         cols_from = colmap.keys()
         cols_into = colmap.values()
@@ -288,7 +294,7 @@ class MysqlHandler(AbstractContextManager):
             f"(select {cols_from_str} from {table_from}) as vals({aliases_str}) "
             f"on duplicate key update {on_dup_str}"
         )
-        debug("statement %(statement)s", {"statement": statement})
+        logger.debug("statement %(statement)s", {"statement": statement})
         return statement
 
     def on_dup(self, col_names: Tuple[str, ...]) -> str:
@@ -300,7 +306,7 @@ class MysqlHandler(AbstractContextManager):
         """
         on_dup_array = [f"{col_name}=vals.{col_name}" for col_name in col_names]
         on_dup = ",".join(on_dup_array)
-        debug("on_dup %(on_dup)s", {"on_dup": on_dup})
+        logger.debug("on_dup %(on_dup)s", {"on_dup": on_dup})
         return on_dup
 
     def reset_auto_increment(self, table: str, col: str) -> int:
