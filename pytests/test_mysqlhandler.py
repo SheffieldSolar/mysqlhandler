@@ -5,17 +5,15 @@ Created on 2 Mar 2015
 
 """
 
+from argparse import Namespace
+from copy import deepcopy
 from datetime import timezone
 from logging import warning
 import logging
-import os
-from os.path import dirname
 from pathlib import Path
-from typing import List, Dict, Any
-import unittest
+from typing import List
 from unittest.mock import MagicMock, patch
 
-import _mysql_connector  # type: ignore
 from mysql import connector
 from mysql.connector.errors import (
     DatabaseError,
@@ -32,77 +30,53 @@ import yaml
 
 from mysql_handler import MysqlHandler
 
+
 # pylint: disable=missing-module-docstring
 # pylint: disable=missing-class-docstring
 # pylint: disable=missing-function-docstring
+TABLE = "testtable"
 
 
-MYSQL_OPTIONS_DEFAULT = {
-    "autocommit": True,
-    "database": "mysql database not set",
-    "host": "mysql host not set",
-    "password": "mysql password not set",
-    "raise_on_warnings": True,
-    "time_zone": "UTC",
-    "user": "mysql user not set",
-}
-
-secrets_file = Path.joinpath(Path(__file__).parent, "..", "secrets", "test_secrets.yml")
+###########################################
+##Module Fixtures
+###########################################
+@pytest.fixture(scope="module")
+def config_file():
+    return Path(Path(__file__).parent, "test_config.yml")
 
 
-@pytest.fixture(autouse=True, scope="module")
-def secrets() -> Dict[str, Any]:
-    """Load secrets file.
-    :return: secrets dict
-    """
-    os.environ["loglevel"] = "DEBUG"
+@pytest.fixture(scope="module")
+def secrets_file():
+    return Path(Path(__file__).parent, "../secrets", "test_secrets.yml")
 
-    with open(secrets_file, "r") as fin:
+
+@pytest.fixture(scope="module")
+def secrets_orig(secrets_file):
+    """Read once. Do not update."""
+    with open(secrets_file, "r", encoding="utf8") as fin:
         try:
             return yaml.safe_load(fin)
         except yaml.YAMLError as ex:
             warning(ex)
-            raise
 
 
-@pytest.fixture(autouse=True, scope="module")
-def mysql_options(secrets) -> Dict[str, Any]:
-    """Load mysql_options.
-    :return: mysql_options
-    """
-    os.environ["loglevel"] = "DEBUG"
-    mysql_options = MYSQL_OPTIONS_DEFAULT
-    mysql_options.update(secrets["mysql_options"])
-    return mysql_options
+@pytest.fixture(scope="module")
+def mysql_options_orig(secrets_orig):
+    """Read once. Do not update."""
+    return secrets_orig.get("mysql_options")
 
 
-@pytest.fixture(autouse=True, scope="module")
-def db_init():
+@pytest.fixture(scope="module")
+def mysql_handler(mysql_options_orig):
     """Connect to database server, create temporary tables (once) because "if not exist"."""
-    global CURSOR
-    global MYSQL_HANDLER
-    global MYSQL_OPTIONS
-    global ROWS
-    global TABLE
-    MYSQL_OPTIONS = {
-        "autocommit": True,
-        "database": "database_is_not_set",
-        "host": "database_host_is_not_set",
-        "password": "database_password_is_not_set",
-        "raise_on_warnings": True,
-        "time_zone": "UTC",
-        "user": "database_user_is_not_set",
-    }
-    secrets_file = os.path.join(dirname(__file__), "../secrets/", "test_secrets.yml")
-    with open(secrets_file, "r") as fin:
-        try:
-            secrets = yaml.safe_load(fin)
-        except yaml.YAMLError as ex:
-            warning(ex)
-    MYSQL_OPTIONS.update(secrets.get("mysql_options"))
-    cnx = connector.connect(**MYSQL_OPTIONS)
-    CURSOR = cnx.cursor()
-    TABLE = "testtable"
+    return MysqlHandler(mysql_options_orig)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def db_init(mysql_handler):
+    """Connect to database server, create temporary tables (once) because "if not exist".
+    autouse=True ensures it is called.
+    Scope module ensures it only runs once."""
     statement = f"""CREATE TEMPORARY TABLE if not exists {TABLE} (
                 id int NOT NULL AUTO_INCREMENT,
                 first_name varchar(45) default "AA" NOT NULL,
@@ -110,7 +84,7 @@ def db_init():
                  PRIMARY KEY (id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
                 """
-    CURSOR.execute(statement)
+    mysql_handler.execute(statement)
     statement = f"""CREATE TEMPORARY TABLE if not exists reading30compact (
                 date timestamp NOT NULL DEFAULT '1970-01-02 00:00:00',
                 ss_id int unsigned NOT NULL,
@@ -147,53 +121,72 @@ def db_init():
                 PRIMARY KEY (date,ss_id)
                 ) ENGINE=InnoDB ROW_FORMAT=DYNAMIC COMMENT='Prepared Passiv Historic data: SSF ss_id (not Passiv install_id). Omits cols: meter_id,missing_periods, daily_total';
                 """
-    CURSOR.execute(statement)
-    MYSQL_HANDLER = MysqlHandler(mysql_options={}, cnx=cnx)
+    mysql_handler.execute(statement)
+
+
+###########################################
+##Fixtures (default scope: function)
+###########################################
+
+
+@pytest.fixture()
+def config():
+    return {"loglevel": "INFO"}
+
+
+@pytest.fixture()
+def secrets(secrets_orig):
+    """Refreshed before each use. OK to update."""
+    return deepcopy(secrets_orig)
+
+
+@pytest.fixture()
+def mysql_options_default():
+    """Refreshed before each use. OK to update."""
+    return {
+        "autocommit": True,
+        "database": "database_is_not_set",
+        "host": "database_host_is_not_set",
+        "password": "database_password_is_not_set",
+        "raise_on_warnings": True,
+        "time_zone": "UTC",
+        "user": "database_user_is_not_set",
+    }
+
+
+@pytest.fixture()
+def mysql_options(mysql_options_orig):
+    """Refreshed before each use. OK to update."""
+    return deepcopy(mysql_options_orig)
 
 
 @pytest.fixture()
 def fixture():
-    class Fixture(unittest.TestCase):
+    class Fixture:
         def __init__(self):
-            global CURSOR
-            global MYSQL_HANDLER
-            global MYSQL_OPTIONS
-            global ROWS
-            global TABLE
-            self.cursor = CURSOR
-            self.mysql_handler = MYSQL_HANDLER
-            self.mysql_options = MYSQL_OPTIONS
             self.rows = [
-                (
-                    1,
-                    "Ann",
-                    "Awk",
-                ),
+                (1, "Ann", "Awk"),
                 (2, "Bob", "Bash"),
-                (
-                    3,
-                    "Cath",
-                    "Curl",
-                ),
+                (3, "Cath", "Curl"),
                 (4, "Dave", "Dig"),
                 (5, "Eve", "Other"),
             ]
             self.table = TABLE
+            self.cols = ("id", "first_name", "last_name")
+            self.cols_str = ",".join(self.cols)
 
     return Fixture()
 
 
 @pytest.fixture()
-def truncate(fixture):
-    fixture.mysql_handler.truncate(fixture.table)
+def truncate(mysql_handler):
+    mysql_handler.execute("truncate test_mysql.testtable")
 
 
 @pytest.fixture()
-def populate(fixture, truncate):
-    fixture.cols = ("id", "first_name", "last_name")
-    fixture.cols_str = ",".join(fixture.cols)
+def populate(fixture, mysql_handler, truncate):
     statement = f"insert into {fixture.table} ({fixture.cols_str}) values (%s,%s,%s)"
-    fixture.cursor.executemany(statement, fixture.rows)
+    mysql_handler.executemany(statement, fixture.rows)
 
 
 class TestMysqlHandlerInit:
@@ -206,69 +199,84 @@ class TestMysqlHandlerInit:
         assert mh.mysql_options == mysql_options
 
     def test_with_mysql_handler(self, mysql_options):
-        with MysqlHandler(mysql_options) as mh:
+        cnx = connector.connect(**mysql_options)
+        with MysqlHandler(mysql_options, cnx=cnx) as mh:
             assert isinstance(mh, MysqlHandler)
+            assert mh.cnx == cnx
+            assert mh.mysql_options == mysql_options
 
-    def test_connection_bad_host(self, mysql_options):
-        mysql_options = {
-            "database": "mysql database not set",
-            "host": "mysql host not set",
-            "password": "mysql password not set",
-            "user": "mysql user not set",
-        }
+    @pytest.mark.parametrize(
+        "k,v",
+        [
+            ("database", "mysql database not set"),
+            ("host", "mysql host not set"),
+            ("password", "mysql password not set"),
+            ("user", "mysql user not set"),
+        ],
+    )
+    def test_connection_error(self, k, v, mysql_options):
+        mysql_options.update({k: v})
         with pytest.raises(connector.errors.Error):
             MysqlHandler(mysql_options=mysql_options)
 
-    # TODO fix this test. Julian 27-nov-2024
     @pytest.mark.parametrize(
-        "key, val",
+        "arg, key",
         [
-            ("MYSQL_DATABASE", "mysql_database"),
-            ("MYSQL_HOST", "mysql_host"),
-            ("MYSQL_PASSWORD", "mysql_password"),
-            ("MYSQL_USER", "mysql_user"),
+            ("mysql_database", "database"),
+            ("mysql_host", "host"),
+            ("mysql_password", "password"),
+            ("mysql_user", "user"),
         ],
     )
-    def test_override_mysql_options(self, key, val, main, mocker) -> None:
-        mocker.patch.dict("os.environ", {key: val})
-        main.override_mysql_options()
-        assert getattr(main.config, val) == val
+    def test_override_mysql_options_env(self, arg, key, mysql_options_default) -> None:
+        mysql_args = {
+            "mysql_database": None,
+            "mysql_host": None,
+            "mysql_password": None,
+            "mysql_user": None,
+        }
+        mysql_args.update({arg: arg})
+        _config: Namespace = Namespace(
+            **mysql_args, mysql_options=mysql_options_default
+        )
+        MysqlHandler.override_mysql_options(_config)
+        assert _config.mysql_options.get(key) == arg
 
 
 class TestMysqlHandlerTruncated:
     """Test methods needing truncated (empty) tables."""
 
-    def test_execute(self, fixture, truncate):
+    def test_execute(self, fixture, mysql_handler, truncate):
         statement = (
             f'insert into {fixture.table} (first_name,last_name) values("A","B")'
         )
-        fixture.mysql_handler.execute(statement)
+        mysql_handler.execute(statement)
         #
         # Check rows have been inserted
         statement = f"select first_name, last_name from {fixture.table} limit 1"
-        row = fixture.mysql_handler.fetchone(statement)
+        row = mysql_handler.fetchone(statement)
         expected = ("A", "B")
         assert row == expected
 
-    def test_executemany(self, fixture, truncate):
+    def test_executemany(self, fixture, mysql_handler, truncate):
         statement = (
             f"insert into {fixture.table} (id, first_name, last_name) values (%s,%s,%s)"
         )
-        fixture.mysql_handler.executemany(statement, fixture.rows)
+        mysql_handler.executemany(statement, fixture.rows)
         # Check row3 and row4 have been inserted
         statement = f"select id, first_name, last_name from {fixture.table}"
-        rows = fixture.mysql_handler.fetchall(statement)
+        rows = mysql_handler.fetchall(statement)
         assert rows == fixture.rows
 
-    def test_executemulti(self, fixture, truncate):
+    def test_executemulti(self, fixture, mysql_handler, truncate):
         statements = (
             f'insert into {fixture.table} (first_name,last_name) values("A","B");'
             f'insert into {fixture.table} (first_name,last_name) values("C","D")'
         )
-        fixture.mysql_handler.execute(statements, multi=True)
+        mysql_handler.execute(statements, multi=True)
         # Check rows have been inserted
         statement = f"select first_name, last_name from {fixture.table}"
-        rows = fixture.mysql_handler.fetchall(statement)
+        rows = mysql_handler.fetchall(statement)
         expected = [
             ("A", "B"),
             ("C", "D"),
@@ -279,18 +287,22 @@ class TestMysqlHandlerTruncated:
 class TestMysqlHandlerPopulated:
     """Tests which need a populated table."""
 
-    def test_insert_on_duplicate_key_update_statement(self, fixture, populate):
+    def test_insert_on_duplicate_key_update_statement(
+        self, fixture, mysql_handler, populate
+    ):
         table = "mytable"
         cols = ["a", "b", "c", "d"]
         keys = ["a", "b"]
         on_dup_str = "c=vals.c,d=vals.d"
-        actual = fixture.mysql_handler.insert_on_duplicate_key_update_statement(
+        actual = mysql_handler.insert_on_duplicate_key_update_statement(
             table, cols, keys
         )
         expected = f"insert into {table} (a,b,c,d) values (%s,%s,%s,%s) as vals on duplicate key update {on_dup_str}"
         assert actual == expected
 
-    def test_insert_select_on_duplicate_key_update_statement(self, fixture, populate):
+    def test_insert_select_on_duplicate_key_update_statement(
+        self, fixture, mysql_handler, populate
+    ):
         table_from = "table_from"
         table_into = "table_into"
         colmap = {
@@ -303,7 +315,7 @@ class TestMysqlHandlerPopulated:
             "col_into0",
             "col_into1",
         ]
-        actual = fixture.mysql_handler.insert_select_on_duplicate_key_update_statement(
+        actual = mysql_handler.insert_select_on_duplicate_key_update_statement(
             table_from, table_into, colmap, keys
         )
         expected = (
@@ -314,101 +326,90 @@ class TestMysqlHandlerPopulated:
         )
         assert actual == expected
 
-    def test_fetchall(self, fixture, populate):
+    def test_fetchall(self, fixture, mysql_handler, populate):
         statement = f"select id, first_name, last_name from {fixture.table} order by id"
-        actual = fixture.mysql_handler.fetchall(statement)
+        actual = mysql_handler.fetchall(statement)
         assert actual == fixture.rows
 
-    def test_fetchall_data(self, fixture, populate):
+    def test_fetchall_data(self, fixture, mysql_handler, populate):
         statement = f"select id, first_name, last_name from {fixture.table} where id in(%s,%s,%s,%s,%s) order by id"
         params = (1, 2, 3, 4, 5)  # [(1,), (2,), (3,), (4,), (5,), ]
-        actual = fixture.mysql_handler.fetchall(statement, params=params)
+        actual = mysql_handler.fetchall(statement, params=params)
         assert actual == fixture.rows
 
-    def test_fetchone(self, fixture, populate):
+    def test_fetchone(self, fixture, mysql_handler, populate):
         statement = f"select id, first_name, last_name from {fixture.table} where id = 1  order by id"
-        row = fixture.mysql_handler.fetchone(statement)
+        row = mysql_handler.fetchone(statement)
         assert row == fixture.rows[0]
 
-    def test_fetchone_param_table_name(self, fixture, populate):
+    def test_fetchone_param_table_name(self, fixture, mysql_handler, populate):
         """Cannot parameterise table name. Can only parameterise values."""
         statement = (
             "select id, first_name, last_name from %(table)s where id = 1  order by id"
         )
         params = {"table": fixture.table}
         with pytest.raises(connector.errors.ProgrammingError):
-            fixture.mysql_handler.fetchone(
+            mysql_handler.fetchone(
                 statement,
                 params=params,
             )
 
-    def test_fetchone_params(self, fixture, populate):
+    def test_fetchone_params(self, fixture, mysql_handler, populate):
         statement = f"select id, first_name, last_name from {fixture.table} where id = %s  order by id"
         params = (1,)
-        row = fixture.mysql_handler.fetchone(statement, params=params)
+        row = mysql_handler.fetchone(statement, params=params)
         assert row == fixture.rows[0]
 
-    def test_fetchone_no_rows_found(self, fixture, populate):
+    def test_fetchone_no_rows_found(self, fixture, mysql_handler, populate):
         statement = (
             f"select id, first_name, last_name from {fixture.table} where id is null"
         )
-        row = fixture.mysql_handler.fetchone(statement)
+        row = mysql_handler.fetchone(statement)
         assert row is None
 
-    def test_insert_on_duplicate_key_update(self, fixture, populate):
-        fixture.mysql_handler.insert_on_duplicate_key_update(
+    def test_insert_on_duplicate_key_update(self, fixture, mysql_handler, populate):
+        mysql_handler.insert_on_duplicate_key_update(
             fixture.table, fixture.cols, fixture.cols[:1], fixture.rows
         )
         # Re-insert to show that on duplicate key update works
-        fixture.mysql_handler.insert_on_duplicate_key_update(
+        mysql_handler.insert_on_duplicate_key_update(
             fixture.table, fixture.cols, fixture.cols[:1], fixture.rows
         )
         # Check rows have been inserted
         statement = f"select * from {fixture.table}"
-        rows = fixture.mysql_handler.fetchall(statement)
+        rows = mysql_handler.fetchall(statement)
         assert rows == fixture.rows
 
-    def test_insert_on_duplicate_key_update_on_dup(self, fixture, populate):
+    def test_insert_on_duplicate_key_update_on_dup(
+        self, fixture, mysql_handler, populate
+    ):
         on_dup = "first_name=vals.first_name,last_name=UPPER(vals.last_name)"
-        fixture.mysql_handler.insert_on_duplicate_key_update(
+        mysql_handler.insert_on_duplicate_key_update(
             fixture.table, fixture.cols, fixture.cols[:1], fixture.rows, on_dup=on_dup
         )
         # Re-insert to show that on duplicate key update works
-        fixture.mysql_handler.insert_on_duplicate_key_update(
+        mysql_handler.insert_on_duplicate_key_update(
             fixture.table, fixture.cols, fixture.cols[:1], fixture.rows, on_dup=on_dup
         )
         # Check rows have been inserted
         statement = f"select * from {fixture.table}"
-        rows = fixture.mysql_handler.fetchall(statement)
+        rows = mysql_handler.fetchall(statement)
         rows_uc = [
-            (
-                1,
-                "Ann",
-                "AWK",
-            ),
+            (1, "Ann", "AWK"),
             (2, "Bob", "BASH"),
-            (
-                3,
-                "Cath",
-                "CURL",
-            ),
+            (3, "Cath", "CURL"),
             (4, "Dave", "DIG"),
             (5, "Eve", "OTHER"),
         ]
-
         assert rows == rows_uc
 
-    def test_on_dup(self, fixture, populate):
-        col_names = [
-            "a",
-            "b",
-            "c",
-        ]
-        actual = fixture.mysql_handler.on_dup(col_names)
+    def test_on_dup(self, fixture, mysql_handler, populate):
+        col_names = ["a", "b", "c"]
+        actual = mysql_handler.on_dup(col_names)
         expected = "a=vals.a,b=vals.b,c=vals.c"
         assert actual == expected
 
-    def test_close_cursor(self, fixture, populate):
+    def test_close_cursor(self, fixture, mysql_handler, populate):
         """
         https://dev.mysql.com/doc/connector-python/en/connector-python-api-errors-error.html
         # Error handling
@@ -416,12 +417,12 @@ class TestMysqlHandlerPopulated:
         NotSupportedError, OperationalError, ProgrammingError, Warning
         """
         with patch.object(
-            fixture.mysql_handler.cnx, "cursor"
+            mysql_handler.cnx, "cursor"
         ) as cursor_fn:  # pylint: disable:undefined-variable
             cursor = cursor_fn()
             cursor.fetchall = MagicMock(return_value=fixture.rows)
             statement = f"select * from {fixture.table}"
-            actual = fixture.mysql_handler.fetchall(statement)
+            actual = mysql_handler.fetchall(statement)
             assert actual == fixture.rows
             cursor.close.assert_called_once_with()
 
@@ -440,7 +441,7 @@ class TestMysqlHandlerPopulated:
             Warning,
         ],
     )
-    def test_close_cursor_on_exception(self, ex, fixture, populate):
+    def test_close_cursor_on_exception(self, ex, fixture, mysql_handler, populate):
         """
         https://dev.mysql.com/doc/connector-python/en/connector-python-api-errors-error.html
         # Error handling
@@ -448,42 +449,24 @@ class TestMysqlHandlerPopulated:
         NotSupportedError, OperationalError, ProgrammingError, Warning
         """
         with patch.object(
-            fixture.mysql_handler.cnx, "cursor"
+            mysql_handler.cnx, "cursor"
         ) as cursor_fn:  # pylint: disable:undefined-variable
             cursor = cursor_fn()
             cursor.execute = MagicMock(side_effect=ex())
             statement = "select * from XXX"  # non existent table
             with pytest.raises(ex):
-                fixture.mysql_handler.execute(statement)
+                mysql_handler.execute(statement)
             cursor.close.assert_called_once_with()
 
     # def test_reset_auto_increment(self):
     #     table = 'testtable'
     #     col = 'id'
     #     statement = f'select max({col}) from {table}'
-    #     max_val = fixture.mysql_handler.fetchone(statement)[0]
-    #     auto_increment = fixture.mysql_handler.reset_auto_increment(table, col)
+    #     max_val = mysql_handler.fetchone(statement)[0]
+    #     auto_increment = mysql_handler.reset_auto_increment(table, col)
     #     self.assertEqual(auto_increment, max_val + 1)
 
-    def test_truncate(self, fixture, populate):
-        table = "testtable"
-        fixture.mysql_handler.truncate(table)
-        statement = f"select * from {table}"
-        rows = fixture.mysql_handler.fetchall(statement)
-        assert rows == []
-
-    def test_type_conf(self, fixture, populate):
-        def lister(list_arg: List[str]):
-            return list_arg
-
-        list_arg = lister(0)
-        print(type(list_arg))
-        print(list_arg)
-        assert list_arg == 0
-
-    def test_insert_on_duplicate_key_long(self, fixture, populate):
-        # n = 6
-        # n = 24
+    def test_insert_on_duplicate_key_long(self, fixture, mysql_handler, populate):
         n = 26
         table = "reading30compact"
         keys = ["date", "ss_id"]
@@ -492,10 +475,9 @@ class TestMysqlHandlerPopulated:
         date = "2022-01-01"
         ss_id = 1
         rows = [(date, ss_id, *vals)]
-        fixture.mysql_handler.insert_on_duplicate_key_update(table, cols, keys, rows)
-        # print(fixture.mysql_handler.execute('show tables'))
+        mysql_handler.insert_on_duplicate_key_update(table, cols, keys, rows)
 
-    def test_timestamp_types(self, fixture, populate):
+    def test_timestamp_types(self, fixture, mysql_handler, populate):
         """
         Determining if an Object is Aware or Naive
         Objects of the date type are always naive.
@@ -511,13 +493,13 @@ class TestMysqlHandlerPopulated:
         The distinction between aware and naive doesn’t apply to timedelta objects.
         """
         statement = "select date from reading30compact"
-        (timestamp,) = fixture.mysql_handler.fetchone(statement)
+        (timestamp,) = mysql_handler.fetchone(statement)
 
         print(timestamp, type(timestamp), timestamp.tzinfo)
         timestamp_aware = timestamp.astimezone(timezone.utc)
         print(timestamp_aware, type(timestamp_aware), timestamp_aware.tzinfo)
 
-        (timestamp2,) = fixture.mysql_handler.fetchone(statement)
+        (timestamp2,) = mysql_handler.fetchone(statement)
         print(timestamp2, type(timestamp2), timestamp2.tzinfo)
 
 
@@ -603,16 +585,3 @@ class TestMysqlExceptionHandling:
         # Logging
         for record in caplog.records:
             assert record.levelname == "CRITICAL"
-
-    def test_truncate_exception(self, caplog, mysql_options):
-        caplog.set_level(logging.INFO)
-        with pytest.raises(_mysql_connector.MySQLInterfaceError) as cm_ex:
-            with MysqlHandler(mysql_options) as mh:
-                table = "no_table"
-                mh.truncate(table)
-            # Exception
-            assert cm_ex.type == _mysql_connector.MySQLInterfaceError
-        # Logging
-        for record in caplog.records:
-            assert record.levelname == "CRITICAL"
-            print(record)
