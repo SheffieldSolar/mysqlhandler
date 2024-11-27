@@ -4,6 +4,7 @@ Created on 2 Mar 2015
 @author: ph1jb
 
 """
+
 from datetime import timezone
 from logging import warning
 import logging
@@ -217,6 +218,21 @@ class TestMysqlHandlerInit:
         }
         with pytest.raises(connector.errors.Error):
             MysqlHandler(mysql_options=mysql_options)
+
+    # TODO fix this test. Julian 27-nov-2024
+    @pytest.mark.parametrize(
+        "key, val",
+        [
+            ("MYSQL_DATABASE", "mysql_database"),
+            ("MYSQL_HOST", "mysql_host"),
+            ("MYSQL_PASSWORD", "mysql_password"),
+            ("MYSQL_USER", "mysql_user"),
+        ],
+    )
+    def test_override_mysql_options(self, key, val, main, mocker) -> None:
+        mocker.patch.dict("os.environ", {key: val})
+        main.override_mysql_options()
+        assert getattr(main.config, val) == val
 
 
 class TestMysqlHandlerTruncated:
@@ -600,7 +616,3 @@ class TestMysqlExceptionHandling:
         for record in caplog.records:
             assert record.levelname == "CRITICAL"
             print(record)
-
-
-if __name__ == "__main__":
-    unittest.main()
