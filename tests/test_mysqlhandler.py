@@ -11,7 +11,6 @@ from datetime import timezone
 from logging import warning
 import logging
 from pathlib import Path
-from typing import List
 from unittest.mock import MagicMock, patch
 
 from mysql import connector
@@ -85,7 +84,7 @@ def db_init(mysql_handler):
                 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
                 """
     mysql_handler.execute(statement)
-    statement = f"""CREATE TEMPORARY TABLE if not exists reading30compact (
+    statement = """CREATE TEMPORARY TABLE if not exists reading30compact (
                 date timestamp NOT NULL DEFAULT '1970-01-02 00:00:00',
                 ss_id int unsigned NOT NULL,
                 t1 float DEFAULT NULL,
