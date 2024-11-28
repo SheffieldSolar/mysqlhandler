@@ -1,0 +1,5 @@
+#Exclude from git diff output
+#Julian Briggs
+#30-oct-2024
+Pipfile.lock -diff
+
