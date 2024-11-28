@@ -65,7 +65,9 @@ def mysql_options_orig(secrets):
 @pytest.fixture(scope="module")
 def mysql_handler(mysql_options_orig):
     """Connect to database server, create temporary tables (once) because "if not exist"."""
-    return MysqlHandler(mysql_options_orig)
+    mh = MysqlHandler(mysql_options_orig)
+    yield mh
+    mh.close()
 
 
 @pytest.fixture(autouse=True, scope="module")
