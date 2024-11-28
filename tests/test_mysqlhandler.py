@@ -37,11 +37,8 @@ TABLE = "testtable"
 
 
 ###########################################
-##Module Fixtures
+##Fixtures: scope Module
 ###########################################
-@pytest.fixture(scope="module")
-def config_file():
-    return Path(Path(__file__).parent, "test_config.yml")
 
 
 @pytest.fixture(scope="module")
@@ -50,7 +47,7 @@ def secrets_file():
 
 
 @pytest.fixture(scope="module")
-def secrets_orig(secrets_file):
+def secrets(secrets_file):
     """Read once. Do not update."""
     with open(secrets_file, "r", encoding="utf8") as fin:
         try:
@@ -60,9 +57,9 @@ def secrets_orig(secrets_file):
 
 
 @pytest.fixture(scope="module")
-def mysql_options_orig(secrets_orig):
+def mysql_options_orig(secrets):
     """Read once. Do not update."""
-    return secrets_orig.get("mysql_options")
+    return secrets.get("mysql_options")
 
 
 @pytest.fixture(scope="module")
@@ -73,70 +70,31 @@ def mysql_handler(mysql_options_orig):
 
 @pytest.fixture(autouse=True, scope="module")
 def db_init(mysql_handler):
-    """Connect to database server, create temporary tables (once) because "if not exist".
+    """Create temporary tables (once) because "if not exist".
     autouse=True ensures it is called.
     Scope module ensures it only runs once."""
-    statement = f"""CREATE TEMPORARY TABLE if not exists {TABLE} (
-                id int NOT NULL AUTO_INCREMENT,
-                first_name varchar(45) default "AA" NOT NULL,
-                last_name varchar(45) default "BB"  NOT NULL,
-                 PRIMARY KEY (id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-                """
+    statement = (
+        f"CREATE TEMPORARY TABLE if not exists {TABLE} ("
+        "id int NOT NULL AUTO_INCREMENT,"
+        'first_name varchar(45) default "AA" NOT NULL,'
+        'last_name varchar(45) default "BB"  NOT NULL,'
+        " PRIMARY KEY (id)) ENGINE=InnoDB;"
+    )
     mysql_handler.execute(statement)
-    statement = """CREATE TEMPORARY TABLE if not exists reading30compact (
-                date timestamp NOT NULL DEFAULT '1970-01-02 00:00:00',
-                ss_id int unsigned NOT NULL,
-                t1 float DEFAULT NULL,
-                t2 float DEFAULT NULL,
-                t3 float DEFAULT NULL,
-                t4 float DEFAULT NULL,
-                t5 float DEFAULT NULL,
-                t6 float DEFAULT NULL,
-                t7 float DEFAULT NULL,
-                t8 float DEFAULT NULL,
-                t9 float DEFAULT NULL,
-                t10 float DEFAULT NULL,
-                t11 float DEFAULT NULL,
-                t12 float DEFAULT NULL,
-                t13 float DEFAULT NULL,
-                t14 float DEFAULT NULL,
-                t15 float DEFAULT NULL,
-                t16 float DEFAULT NULL,
-                t17 float DEFAULT NULL,
-                t18 float DEFAULT NULL,
-                t19 float DEFAULT NULL,
-                t20 float DEFAULT NULL,
-                t21 float DEFAULT NULL,
-                t22 float DEFAULT NULL,
-                t23 float DEFAULT NULL,
-                t24 float DEFAULT NULL,
-                t25 float DEFAULT NULL,
-                t26 float DEFAULT NULL,
-                t27 float DEFAULT NULL,
-                t28 float DEFAULT NULL,
-                t29 float DEFAULT NULL,
-                t30 float DEFAULT NULL,
-                PRIMARY KEY (date,ss_id)
-                ) ENGINE=InnoDB ROW_FORMAT=DYNAMIC COMMENT='Prepared Passiv Historic data: SSF ss_id (not Passiv install_id). Omits cols: meter_id,missing_periods, daily_total';
-                """
+    t_str = ",".join([f"t{i} float DEFAULT NULL" for i in range(1, 30)])
+    statement = (
+        "CREATE TEMPORARY TABLE if not exists reading30compact ("
+        "date timestamp NOT NULL DEFAULT '1970-01-02 00:00:00',"
+        "ss_id int unsigned NOT NULL,"
+        f"{t_str},"
+        "PRIMARY KEY (date,ss_id)) ENGINE=InnoDB;"
+    )
     mysql_handler.execute(statement)
 
 
 ###########################################
 ##Fixtures (default scope: function)
 ###########################################
-
-
-@pytest.fixture()
-def config():
-    return {"loglevel": "INFO"}
-
-
-@pytest.fixture()
-def secrets(secrets_orig):
-    """Refreshed before each use. OK to update."""
-    return deepcopy(secrets_orig)
 
 
 @pytest.fixture()
@@ -235,11 +193,9 @@ class TestMysqlHandlerInit:
             "mysql_user": None,
         }
         mysql_args.update({arg: arg})
-        _config: Namespace = Namespace(
-            **mysql_args, mysql_options=mysql_options_default
-        )
-        MysqlHandler.override_mysql_options(_config)
-        assert _config.mysql_options.get(key) == arg
+        config: Namespace = Namespace(**mysql_args, mysql_options=mysql_options_default)
+        MysqlHandler.override_mysql_options(config)
+        assert config.mysql_options.get(key) == arg
 
 
 class TestMysqlHandlerTruncated:
