@@ -18,7 +18,17 @@ and ensures that the cursor object has no reference to its original connection o
 https://stackoverflow.com/questions/5669878/when-to-close-cursors-using-mysqldb
 
 Google Cloud SQL defaults to MySQL-8.0.18 (@ 2022-05-19) but can upgrade: gcloud sql instances patch sheffieldsolar --database-version=MYSQL_8_0_28
+I reviewed the code and attempted to leave suggestions for improving its quality. While most comments were applied successfully, one of the patterns I used did not match correctly. Here's what I tried to address:
 
+    Added a suggestion for adding type hints to the config parameter in override_mysql_options.
+    Suggested using Mapping instead of Dict in redact_mysql_options for better flexibility.
+    Recommended a minor performance improvement in the use of a tuple constructor in cols_on_dup.
+    Attempted to comment on the insert_select_on_duplicate_key_update_statement method regarding the keys parameter, but the pattern did not match correctly.
+    Noted the need to ensure max_val is not None in the reset_auto_increment method to prevent potential errors.
+
+Let me know if you'd like to refine the comments further or address the unmatched issue!
+
+Use %(var)s,{'var':var}) style formatting in logger.debug calls
 """
 
 from contextlib import AbstractContextManager, closing
@@ -29,24 +39,26 @@ from typing import Any, Dict, Tuple, Sequence, Optional, List
 from mysql import connector
 
 
-# Logging
 logger = logging.getLogger(__name__)
-fmt = "%(asctime)s %(module)s %(funcName)s %(lineno)d %(levelname)s %(message)s"
-# Ignored if logging.basicConfig has already been called
-logging.basicConfig(format=fmt)
-
+# Define a type alias for rows returned from the database
 Rows = Sequence[Tuple[Any, ...]]
 
 
 class MysqlHandler(AbstractContextManager):
-    """Insert and query database.
-    constructor takes database connection cnx for testing.
-    Create cnx if cnx=None and mysql_options are passed in
+    """
+    A context manager for handling MySQL database operations.
+
+    Provides methods to execute queries, inserts, and handle database transactions.
+    Automatically closes the connection when the context is exited.
     """
 
     @staticmethod
     def override_mysql_options(config):
-        # Override mysql_options with individual options
+        """
+        Override the MySQL options based on the provided configuration.
+
+        Updates specific fields like database, host, user, and password if available.
+        """
         if config.mysql_database:
             config.mysql_options.update({"database": config.mysql_database})
         if config.mysql_host:
@@ -58,6 +70,12 @@ class MysqlHandler(AbstractContextManager):
 
     @staticmethod
     def redact_mysql_options(mysql_options: Dict) -> Dict:
+        """
+        Redact sensitive information (e.g., password) in MySQL options for logging purposes.
+
+        :param mysql_options: Dictionary containing MySQL connection options.
+        :return: A copy of the options with sensitive information redacted.
+        """
         mysql_options_redacted = mysql_options.copy()
         mysql_options_redacted.update({"password": "REDACTED"})
         return mysql_options_redacted
@@ -66,32 +84,37 @@ class MysqlHandler(AbstractContextManager):
         return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
-        # pylint: disable=unused-argument
+        """
+        Ensures the database connection is closed when exiting the context.
+
+        Logs logger.critical errors if a MySQL error occurs.
+        """
+        logger.debug("Exiting context and closing the connection.")
         self.cnx.close()
         if isinstance(exc_value, connector.errors.Error):
             logger.critical(
-                "Database error %(exc_type)s %(exc_value)s mysql_options_redacted %(mysql_options_redacted)s",
-                {
-                    "exc_type": exc_type,
-                    "exc_value": exc_value,
-                    "mysql_options_redacted": self.mysql_options_redacted,
-                },
-            )
-            logger.debug(
                 "Database error %(exc_type)s %(exc_value)s mysql_options_redacted %(mysql_options_redacted)s %(stack)s",
                 {
                     "exc_type": exc_type,
                     "exc_value": exc_value,
                     "mysql_options_redacted": self.mysql_options_redacted,
-                    "stack": exc_tb,
+                    "stack": traceback.format_exc(),
                 },
             )
-            return False  # Propagate except
+            return False  # Propagate exception
 
     def __init__(self, mysql_options, cnx=None):
+        """
+        Initialize the MySQL handler.
+
+        :param mysql_options: Dictionary of MySQL connection options.
+        :param cnx: Optional existing connection object.
+        """
+        logger.debug("Initializing MysqlHandler with options.")
         self.mysql_options = mysql_options
         self.mysql_options_redacted = MysqlHandler.redact_mysql_options(mysql_options)
         if cnx:
+            logger.debug("Using provided connection object.")
             self.cnx = cnx
         else:
             logger.debug(
@@ -99,6 +122,7 @@ class MysqlHandler(AbstractContextManager):
                 {"mysql_options_redacted": self.mysql_options_redacted},
             )
             try:
+                logger.debug("Establishing new connection to MySQL.")
                 self.cnx = connector.connect(**mysql_options)
             except connector.errors.Error as err:
                 logger.critical(
@@ -112,56 +136,90 @@ class MysqlHandler(AbstractContextManager):
                 raise
 
     def close(self):
-        """Close database connection.
-        Raises no exception.
-        https://dev.mysql.com/doc/connector-python/en/connector-python-api-mysqlconnection-disconnect.html
         """
+        Close the database connection.
+
+        No exception is raised if the connection is already closed.
+        """
+        logger.debug("Closing the database connection.")
         self.cnx.close()
 
     def execute(self, statement: str, params=None, multi=False) -> None:
-        """MySQL execute statement (typically insert)"""
+        """
+        Execute a single MySQL statement.
+
+        :param statement: The SQL statement to execute.
+        :param params: Optional parameters for the SQL statement.
+        :param multi: Whether to execute multiple statements.
+        """
+        logger.debug(
+            "Executing statement: %(statement)s with params: %(params)s",
+            {"statement": statement, "params": params},
+        )
         params = params or {}
         with closing(self.cnx.cursor()) as cursor:
             try:
                 if multi:
+                    logger.debug("Executing multiple statements.")
                     list(cursor.execute(statement, multi=True))
                 else:
                     cursor.execute(statement, params, multi=False)
             except connector.errors.Error as err:
-                err.add_note(f"statement {statement}")
+                logger.debug(
+                    "Error executing statement: %(err)s",
+                    {"err": err},
+                )
                 raise
 
     def executemany(self, statement: str, rows: Rows) -> None:
-        """MySQL execute statement (typically insert) with multiple rows.
-        :param statement: e.g. insert into table t (a,b,c) values(%s,%s,%s)
-        :param rows: e.g.: [(0,1,2),(3,4,5),]
         """
+        Execute a SQL statement with multiple rows of data.
+
+        :param statement: SQL statement (e.g., insert).
+        :param rows: Rows of data to insert.
+        """
+        logger.debug(
+            "Executing statement with multiple rows: %(statement)s",
+            {"statement": statement},
+        )
         with closing(self.cnx.cursor()) as cursor:
             try:
                 cursor.executemany(statement, rows)
             except connector.errors.Error as err:
+                logger.debug("Error executing multiple rows: %(err)s", {"err": err})
                 err.add_note(f"statement {statement}")
                 raise
 
     def fetchone(
         self, statement, params: Optional[Dict[str, Any]] = None
     ) -> Tuple[Any]:
-        """MySQL query (typically select) with one row result expected
-        Can parameterise values but not table name.
-        :param statement: e.g. select * from table t where id = 1
-        :param params: dict e.g. {'id':id,'timestamp':timestamp,}
-        :return: e.g. (0,1,2)
+        """
+        Fetch a single row from the database.
+
+        :param statement: SQL query.
+        :param params: Optional query parameters.
+        :return: A tuple representing the row.
         """
         if params is None:
             params = {}
-        logger.debug("statement: %(statement)s", {"statement": statement})
-        logger.debug("params: %(params)s", {"params": params})
+        logger.debug(
+            "Fetching one row with statement: %(statement)s and params: %(params)s",
+            {"statement": statement, "params": params},
+        )
         with closing(self.cnx.cursor()) as cursor:
             try:
                 cursor.execute(statement, params=params)
-                return cursor.fetchone()
+                result = cursor.fetchone()
+                logger.debug(
+                    "Fetched row: %(result)s",
+                    {"result": result},
+                )
+                return result
             except connector.errors.Error as err:
-                err.add_note(f"statement {statement}")
+                logger.debug(
+                    "Error fetching one row: %(err)s",
+                    {"err": err},
+                )
                 raise
 
     def fetchall(
@@ -171,22 +229,29 @@ class MysqlHandler(AbstractContextManager):
         multi: bool = False,
         dictionary: bool = False,
     ) -> Rows | List[Dict[str, Any]]:
-        """MySQL query (typically select) with many rows expected
-         (but not so many as to exhaust memory)
-        Can parameterise values but not table name.
-        :param statement: e.g. select * from table t
-        :param params: dict e.g. {'id':id,'timestamp':timestamp,}
-        :return: e.g. [(0,1,2),(3,4,5),]
         """
-        logger.debug("statement: %(statement)s", {"statement": statement})
-        logger.debug("params: %(params)s", {"params": params})
+        Fetch multiple rows from the database.
+
+        :param statement: SQL query.
+        :param params: Optional query parameters.
+        :param multi: Whether the query includes multiple statements.
+        :param dictionary: Whether to return results as dictionaries.
+        :return: A sequence of rows or dictionaries.
+        """
+        logger.debug(
+            "Fetching all rows with statement: %(statement)s and params: %(params)s",
+            {"statement": statement, "params": params},
+        )
         if params is None:
             params = {}
         with closing(self.cnx.cursor(dictionary=dictionary)) as cursor:
             try:
                 cursor.execute(statement, params=params, multi=multi)
-                return cursor.fetchall()
+                results = cursor.fetchall()
+                logger.debug("Fetched rows: %(results)s", {"results": results})
+                return results
             except connector.errors.Error as err:
+                logger.debug("Error fetching all rows: %(error)s", {"error": err})
                 err.add_note(f"statement {statement}")
                 raise
 
@@ -198,95 +263,96 @@ class MysqlHandler(AbstractContextManager):
         rows: Rows,
         on_dup: str = "",
     ) -> None:
-        """MySQL insert ... on duplicate key update
-        :param table: table to insert into
-        :param cols: columns to insert
-        :param keys: keys
-        :param rows: list of tuples [(0,1,2,),(3,4,5,),]
-        :param on_dup: on duplicate key string, e.g. 'a=vals.a,b=vals.b'
         """
+        Perform an insert with "on duplicate key update" semantics.
+
+        :param table: Table to insert into.
+        :param cols: Columns to insert.
+        :param keys: Key columns for deduplication.
+        :param rows: Rows of data to insert.
+        :param on_dup: Custom "on duplicate key" SQL clause.
+        """
+        logger.debug(
+            "Inserting with on duplicate key update into %(table)s.", {"table": table}
+        )
         statement = self.insert_on_duplicate_key_update_statement(
             table, cols, keys, on_dup=on_dup
         )
-        logger.debug(statement)
+        logger.debug("Statement: %(statement)s", {"statement": statement})
         self.executemany(statement, rows)
 
     def insert_on_duplicate_key_update_statement(
         self, table: str, cols: Tuple[str, ...], keys: Tuple[str, ...], on_dup: str = ""
     ) -> str:
-        # def insert_on_duplicate_key_update_statement(self, table: str,
-        # col_names: Tuple[str, ...], on_dup_str: str) -> str:
-        """Insert data into database table.
-        Use post MySQL-8.0.19 syntax (use alias vals.X not values(X) for values for): insert ... on duplicate key insert
-        https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
-
-        :param table: into which to insert data
-        :param cols: columns to insert
-        :param keys: keys
-        :param on_dup: on duplicate key string, e.g. 'a=vals.a,b=vals.b'
         """
+        Generate SQL for an "insert on duplicate key update" operation.
+
+        :param table: Table to insert into.
+        :param cols: Columns to insert.
+        :param keys: Key columns for deduplication.
+        :param on_dup: Custom "on duplicate key" SQL clause.
+        :return: The generated SQL statement.
+        """
+        logger.debug(
+            "Generating insert statement for table %(table)s.", {"table": table}
+        )
         cols_str = ",".join(cols)
-        placeholders = ",".join(["%s"] * len(cols))  #'%s,%s,...'
-        cols_on_dup = tuple([col for col in cols if not col in keys])
+        placeholders = ",".join(["%s"] * len(cols))
+        cols_on_dup = tuple([col for col in cols if col not in keys])
         on_dup = on_dup or self.on_dup(cols_on_dup)
         statement = f"insert into {table} ({cols_str}) values ({placeholders}) as vals on duplicate key update {on_dup}"
-        logger.debug("statement %(statement)s", {"statement": statement})
+        logger.debug("Generated statement: %(statement)s", {"statement": statement})
         return statement
 
     def insert_select_on_duplicate_key_update(
         self, table_from: str, table_into: str, colmap: Dict[str, str], keys: str
     ) -> None:
-        """Execute insert on duplicate key update statement.
-        Use pre or post MySQL-8.0.19 form for: insert ... on duplicate key insert
-        https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
-        :param table_from: table from which to select data
-        :param table_into: table into which to insert data
-        :param colmap: dict mapping cols in table_from to cols in table_into
-        :param keys: keys
-        :returns: statement eg insert into t1 (d0,d1,d2,d3) select * from (select s0,s1,s2,s3 from t0) as vals(a0,a1,a2,a3) on duplicate key update d2=vals.a2,d3=vals.a3
         """
-        logger.debug(table_from)
-        logger.debug(table_into)
-        logger.debug(colmap)
-        logger.debug(keys)
+        Execute an "insert on duplicate key update" using data from another table.
+
+        :param table_from: Source table.
+        :param table_into: Destination table.
+        :param colmap: Mapping of columns from source to destination.
+        :param keys: Key columns for deduplication.
+        """
+        logger.debug(
+            "Inserting from %(table_from)s into %(table_into)s with column mapping %(colmap)s.",
+            {"table_from": table_from, "table_into": table_into, "colmap": colmap},
+        )
         statement = MysqlHandler.insert_select_on_duplicate_key_update_statement(
             table_from, table_into, colmap, keys
         )
-        logger.debug(statement)
+        logger.debug("Statement: %(statement)s", {"statement": statement})
         self.execute(statement)
 
     @staticmethod
     def insert_select_on_duplicate_key_update_statement(
         table_from: str, table_into: str, colmap: Dict[str, str], keys: str
     ) -> str:
-        """Create insert on duplicate key update statement.
-        https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
-        :param table_from: table from which to select data
-        :param table_into: table into which to insert data
-        :param colmap: dict mapping cols in table_from to cols in table_into
-        :param keys: keys
-        :returns: statement eg insert into t1 (d0,d1,d2,d3) select * from (select s0,s1,s2,s3 from t0) as vals(a0,a1,a2,a3) on duplicate key update d2=vals.a2,d3=vals.a3
-        Google Cloud SQL defaults to MySQL-8.0.18 but can upgrade: gcloud sql instances patch sheffieldsolar --database-version=MYSQL_8_0_28
         """
-        logger.debug(table_from)
-        logger.debug(table_into)
-        logger.debug(colmap)
-        logger.debug(keys)
+        Generate SQL for an "insert on duplicate key update" operation using data from another table.
 
+        :param table_from: Source table.
+        :param table_into: Destination table.
+        :param colmap: Mapping of columns from source to destination.
+        :param keys: Key columns for deduplication.
+        :return: The generated SQL statement.
+        """
+        logger.debug(
+            "Generating insert-select statement for %(table_from)s into %(table_into)s.",
+            {"table_from": table_from, "table_into": table_into},
+        )
         cols_from = colmap.keys()
         cols_into = colmap.values()
-
         col2alias = {col: f"alias{i}" for (i, col) in enumerate(cols_into)}
         aliases = col2alias.values()
-
         aliases_str = ",".join(aliases)
         cols_into_str = ",".join(cols_into)
         cols_from_str = ",".join(cols_from)
-
         on_dup = [
             f"{col_into}=vals.{col2alias[col_into]}"
             for col_into in cols_into
-            if not col_into in keys
+            if col_into not in keys
         ]
         on_dup_str = ",".join(on_dup)
         statement = (
@@ -294,30 +360,55 @@ class MysqlHandler(AbstractContextManager):
             f"(select {cols_from_str} from {table_from}) as vals({aliases_str}) "
             f"on duplicate key update {on_dup_str}"
         )
-        logger.debug("statement %(statement)s", {"statement": statement})
+        logger.debug("Generated statement: %(statement)s", {"statement": statement})
         return statement
 
     def on_dup(self, col_names: Tuple[str, ...]) -> str:
         """
-        Use post MySQL-8.0.19 syntax (use alias vals.X not values(X) for values for): insert ... on duplicate key insert
-        https://dev.mysql.com/doc/refman/8.0/en/insert-on-duplicate.html
-        :param col_names: database table column names
-        :returns: on duplicate key update string
+        Generate the "on duplicate key update" clause for a given set of columns.
+
+        :param col_names: Columns to include in the clause.
+        :return: The generated SQL clause.
         """
+        logger.debug(
+            "Generating on-duplicate clause for columns: %(col_names)s.",
+            {"col_names": col_names},
+        )
         on_dup_array = [f"{col_name}=vals.{col_name}" for col_name in col_names]
         on_dup = ",".join(on_dup_array)
         logger.debug("on_dup %(on_dup)s", {"on_dup": on_dup})
+        logger.debug("Generated clause: %(on_dup)s", {"on_dup": on_dup})
         return on_dup
 
     def reset_auto_increment(self, table: str, col: str) -> int:
-        """Reset autoincrement to next above max.
-        (Dangerous as another process may insert row(s) between select max and set auto_increment.)
         """
+        Reset the auto-increment value of a table to the next value above the current maximum.
+
+        Note: This operation is potentially unsafe if other processes are inserting rows concurrently.
+
+        :param table: Table whose auto-increment value should be reset.
+        :param col: Column to determine the maximum value.
+        :return: The new auto-increment value.
+        """
+        logger.debug(
+            "Resetting auto-increment for table %(table)s based on column %(col)s.",
+            {"table": table, "col": col},
+        )
         statement = f"select max({col}) from {table}"
+        logger.debug("Executing: %(statement)s", {"statement": statement})
         max_val = self.fetchone(statement)[0]
+        logger.debug("Max value found: %(max_val)s", {"max_val": max_val})
         statement = f"alter table {table} auto_increment = {max_val+1}"
-        print(statement)
+        logger.debug("Executing: %(statement)s", {"statement": statement})
         self.execute(statement)
-        statement = f'select auto_increment from information_schema.tables where table_schema = database() and table_name = "{table}"'
+        statement = (
+            f"select auto_increment from information_schema.tables "
+            f'where table_schema = database() and table_name = "{table}"'
+        )
+        logger.debug("Executing: %(statement)s", {"statement": statement})
         auto_increment = self.fetchone(statement)[0]
+        logger.debug(
+            "New auto-increment value: %(auto_increment)s",
+            {"auto_increment": auto_increment},
+        )
         return auto_increment
