@@ -299,7 +299,7 @@ class MysqlHandler(AbstractContextManager):
         cols_str = ",".join(cols)
         placeholders = ",".join(["%s"] * len(cols))
         cols_on_dup = tuple([col for col in cols if col not in keys])
-        on_dup = on_dup or self.on_dup(cols_on_dup)
+        on_dup = on_dup or MysqlHandler.on_dup(cols_on_dup)
         statement = f"insert into {table} ({cols_str}) values ({placeholders}) as vals on duplicate key update {on_dup}"
         logger.debug("Generated statement: %(statement)s", {"statement": statement})
         return statement
@@ -363,7 +363,8 @@ class MysqlHandler(AbstractContextManager):
         logger.debug("Generated statement: %(statement)s", {"statement": statement})
         return statement
 
-    def on_dup(self, col_names: Tuple[str, ...]) -> str:
+    @staticmethod
+    def on_dup(col_names: Tuple[str, ...]) -> str:
         """
         Generate the "on duplicate key update" clause for a given set of columns.
 
