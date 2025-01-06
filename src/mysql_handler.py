@@ -28,7 +28,7 @@ I reviewed the code and attempted to leave suggestions for improving its quality
 
 Let me know if you'd like to refine the comments further or address the unmatched issue!
 
-Use %(var)s,{'var':var}) style formatting in logger.debug calls
+Use logger.info(%(var)s,{'var':var}) style formatting in logger.debug calls
 """
 
 from contextlib import AbstractContextManager, closing
