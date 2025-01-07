@@ -301,4 +301,104 @@ class MysqlHandler(AbstractContextManager):
 
         Args:
             table (str): Table to insert into.
-            cols (Tuple[str, ...]): Columns
+            cols (Tuple[str, ...]): Columns to insert.
+            keys (Tuple[str, ...]): Key columns for deduplication.
+            on_dup (str): Custom "on duplicate key" SQL clause.
+
+        Returns:
+            str: The generated SQL statement.
+        """
+        logger.debug(
+            "Generating insert statement for table %(table)s.", {"table": table}
+        )
+        cols_str = ",".join(cols)
+        placeholders = ",".join(["%s"] * len(cols))
+        cols_on_dup = tuple(col for col in cols if col not in keys)
+        on_dup = on_dup or MysqlHandler.on_dup(cols_on_dup)
+        statement = f"insert into {table} ({cols_str}) values ({placeholders}) as vals on duplicate key update {on_dup}"
+        logger.debug("Generated statement: %(statement)s", {"statement": statement})
+        return statement
+
+    def insert_select_on_duplicate_key_update(
+        self, table_from: str, table_into: str, colmap: Dict[str, str], keys: str
+    ) -> None:
+        """
+        Execute an "insert on duplicate key update" using data from another table.
+
+        Args:
+            table_from (str): Source table.
+            table_into (str): Destination table.
+            colmap (Dict[str, str]): Mapping of columns from source to destination.
+            keys (str): Key columns for deduplication.
+        """
+        logger.debug(
+            "Inserting from %(table_from)s into %(table_into)s with column mapping %(colmap)s.",
+            {"table_from": table_from, "table_into": table_into, "colmap": colmap},
+        )
+        statement = MysqlHandler.insert_select_on_duplicate_key_update_statement(
+            table_from, table_into, colmap, keys
+        )
+        logger.debug("Statement: %(statement)s", {"statement": statement})
+        self.execute(statement)
+
+    @staticmethod
+    def insert_select_on_duplicate_key_update_statement(
+        table_from: str, table_into: str, colmap: Dict[str, str], keys: str
+    ) -> str:
+        """
+        Generate SQL for an "insert on duplicate key update" operation using data from another table.
+
+        Args:
+            table_from (str): Source table.
+            table_into (str): Destination table.
+            colmap (Dict[str, str]): Mapping of columns from source to destination.
+            keys (str): Key columns for deduplication.
+
+        Returns:
+            str: The generated SQL statement.
+        """
+        logger.debug(
+            "Generating insert-select statement for %(table_from)s into %(table_into)s.",
+            {"table_from": table_from, "table_into": table_into},
+        )
+        cols_from = colmap.keys()
+        cols_into = colmap.values()
+        col2alias = {col: f"alias{i}" for (i, col) in enumerate(cols_into)}
+        aliases = col2alias.values()
+        aliases_str = ",".join(aliases)
+        cols_into_str = ",".join(cols_into)
+        cols_from_str = ",".join(cols_from)
+        on_dup = [
+            f"{col_into}=vals.{col2alias[col_into]}"
+            for col_into in cols_into
+            if col_into not in keys
+        ]
+        on_dup_str = ",".join(on_dup)
+        statement = (
+            f"insert into {table_into} ({cols_into_str}) select * from "
+            f"(select {cols_from_str} from {table_from}) as vals({aliases_str}) "
+            f"on duplicate key update {on_dup_str}"
+        )
+        logger.debug("Generated statement: %(statement)s", {"statement": statement})
+        return statement
+
+    @staticmethod
+    def on_dup(col_names: Tuple[str, ...]) -> str:
+        """
+        Generate the "on duplicate key update" clause for a given set of columns.
+
+        Args:
+            col_names (Tuple[str, ...]): Columns to include in the clause.
+
+        Returns:
+            str: The generated SQL clause.
+        """
+        logger.debug(
+            "Generating on-duplicate clause for columns: %(col_names)s.",
+            {"col_names": col_names},
+        )
+        on_dup_array = [f"{col_name}=vals.{col_name}" for col_name in col_names]
+        on_dup = ",".join(on_dup_array)
+        logger.debug("on_dup %(on_dup)s", {"on_dup": on_dup})
+        logger.debug("Generated clause: %(on_dup)s", {"on_dup": on_dup})
+        return on_dup
