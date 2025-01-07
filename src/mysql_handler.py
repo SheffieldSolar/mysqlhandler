@@ -20,13 +20,6 @@ https://stackoverflow.com/questions/5669878/when-to-close-cursors-using-mysqldb
 Google Cloud SQL defaults to MySQL-8.0.18 (@ 2022-05-19) but can upgrade: gcloud sql instances patch sheffieldsolar --database-version=MYSQL_8_0_28
 I reviewed the code and attempted to leave suggestions for improving its quality. While most comments were applied successfully, one of the patterns I used did not match correctly. Here's what I tried to address:
 
-    Added a suggestion for adding type hints to the config parameter in override_mysql_options. DONE
-    Suggested using Mapping instead of Dict in redact_mysql_options for better flexibility. DONE
-    Recommended a minor performance improvement in the use of a tuple constructor in cols_on_dup. DONE
-    Attempted to comment on the insert_select_on_duplicate_key_update_statement method regarding the keys parameter, but the pattern did not match correctly.
-    Noted the need to ensure max_val is not None in the reset_auto_increment method to prevent potential errors. DONE
-
-Use logger.info(%(var)s,{'var':var}) style formatting in logger.debug calls
 """
 
 from argparse import Namespace
