@@ -24,11 +24,10 @@ I reviewed the code and attempted to leave suggestions for improving its quality
 
 from argparse import Namespace
 from contextlib import AbstractContextManager, closing
+from mysql import connector
+from typing import Any, Dict, Tuple, Sequence, Optional, List
 import logging
 import traceback
-from typing import Any, Dict, Tuple, Sequence, Optional, List
-
-from mysql import connector
 
 
 logger = logging.getLogger(__name__)
@@ -140,14 +139,13 @@ class MysqlHandler(AbstractContextManager):
         logger.debug("Closing the database connection.")
         self.cnx.close()
 
-    def execute(self, statement: str, params=None, multi=False) -> None:
+    def execute(self, statement: str, params=None) -> None:
         """
         Execute a single MySQL statement.
 
         Args:
             statement (str): The SQL statement to execute.
             params (Optional[dict]): Optional parameters for the SQL statement.
-            multi (bool): Whether to execute multiple statements.
         """
         logger.debug(
             "Executing statement: %(statement)s with params: %(params)s",
@@ -156,11 +154,7 @@ class MysqlHandler(AbstractContextManager):
         params = params or {}
         with closing(self.cnx.cursor()) as cursor:
             try:
-                if multi:
-                    logger.debug("Executing multiple statements.")
-                    list(cursor.execute(statement, multi=True))
-                else:
-                    cursor.execute(statement, params, multi=False)
+                cursor.execute(statement, params)
             except connector.errors.Error as err:
                 logger.debug(
                     "Error executing statement: %(err)s",
@@ -227,7 +221,6 @@ class MysqlHandler(AbstractContextManager):
         self,
         statement: str,
         params: Optional[Dict[str, Any]] = None,
-        multi: bool = False,
         dictionary: bool = False,
     ) -> Rows | List[Dict[str, Any]]:
         """
@@ -236,7 +229,6 @@ class MysqlHandler(AbstractContextManager):
         Args:
             statement (str): SQL query.
             params (Optional[dict]): Optional query parameters.
-            multi (bool): Whether the query includes multiple statements.
             dictionary (bool): Whether to return results as dictionaries.
 
         Returns:
@@ -250,7 +242,7 @@ class MysqlHandler(AbstractContextManager):
             params = {}
         with closing(self.cnx.cursor(dictionary=dictionary)) as cursor:
             try:
-                cursor.execute(statement, params=params, multi=multi)
+                cursor.execute(statement, params=params)
                 results = cursor.fetchall()
                 logger.debug("Fetched rows: %(results)s", {"results": results})
                 return results
