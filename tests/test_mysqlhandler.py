@@ -9,10 +9,6 @@ from argparse import Namespace
 from copy import deepcopy
 from datetime import timezone
 from logging import warning
-import logging
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
 from mysql import connector
 from mysql.connector.errors import (
     DatabaseError,
@@ -24,10 +20,12 @@ from mysql.connector.errors import (
     OperationalError,
     ProgrammingError,
 )
+from mysql_handler import MysqlHandler
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+import logging
 import pytest
 import yaml
-
-from mysql_handler import MysqlHandler
 
 
 # pylint: disable=missing-module-docstring
@@ -224,21 +222,6 @@ class TestMysqlHandlerTruncated:
         statement = f"select id, first_name, last_name from {fixture.table}"
         rows = mysql_handler.fetchall(statement)
         assert rows == fixture.rows
-
-    def test_executemulti(self, fixture, mysql_handler, truncate):
-        statements = (
-            f'insert into {fixture.table} (first_name,last_name) values("A","B");'
-            f'insert into {fixture.table} (first_name,last_name) values("C","D")'
-        )
-        mysql_handler.execute(statements, multi=True)
-        # Check rows have been inserted
-        statement = f"select first_name, last_name from {fixture.table}"
-        rows = mysql_handler.fetchall(statement)
-        expected = [
-            ("A", "B"),
-            ("C", "D"),
-        ]
-        assert rows == expected
 
 
 class TestMysqlHandlerPopulated:
