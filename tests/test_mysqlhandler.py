@@ -20,7 +20,7 @@ from mysql.connector.errors import (
     OperationalError,
     ProgrammingError,
 )
-from mysql_handler import MysqlHandler
+from mysqlhandler.mysql_handler import MysqlHandler
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import logging
@@ -41,7 +41,7 @@ TABLE = "testtable"
 
 @pytest.fixture(scope="module")
 def secrets_file():
-    return Path(Path(__file__).parent, "../secrets", "test_secrets.yml")
+    return Path(Path(__file__).parent.parent, "secrets", "test_secrets.yml")
 
 
 @pytest.fixture(scope="module")
@@ -202,9 +202,7 @@ class TestMysqlHandlerTruncated:
     """Test methods needing truncated (empty) tables."""
 
     def test_execute(self, fixture, mysql_handler, truncate):
-        statement = (
-            f'insert into {fixture.table} (first_name,last_name) values("A","B")'
-        )
+        statement = f'insert into {fixture.table} (first_name,last_name) values("A","B")'
         mysql_handler.execute(statement)
         #
         # Check rows have been inserted
@@ -214,9 +212,7 @@ class TestMysqlHandlerTruncated:
         assert row == expected
 
     def test_executemany(self, fixture, mysql_handler, truncate):
-        statement = (
-            f"insert into {fixture.table} (id, first_name, last_name) values (%s,%s,%s)"
-        )
+        statement = f"insert into {fixture.table} (id, first_name, last_name) values (%s,%s,%s)"
         mysql_handler.executemany(statement, fixture.rows)
         # Check row3 and row4 have been inserted
         statement = f"select id, first_name, last_name from {fixture.table}"
@@ -227,16 +223,12 @@ class TestMysqlHandlerTruncated:
 class TestMysqlHandlerPopulated:
     """Tests which need a populated table."""
 
-    def test_insert_on_duplicate_key_update_statement(
-        self, fixture, mysql_handler, populate
-    ):
+    def test_insert_on_duplicate_key_update_statement(self, fixture, mysql_handler, populate):
         table = "mytable"
         cols = ["a", "b", "c", "d"]
         keys = ["a", "b"]
         on_dup_str = "c=vals.c,d=vals.d"
-        actual = mysql_handler.insert_on_duplicate_key_update_statement(
-            table, cols, keys
-        )
+        actual = mysql_handler.insert_on_duplicate_key_update_statement(table, cols, keys)
         expected = f"insert into {table} (a,b,c,d) values (%s,%s,%s,%s) as vals on duplicate key update {on_dup_str}"
         assert actual == expected
 
@@ -278,15 +270,15 @@ class TestMysqlHandlerPopulated:
         assert actual == fixture.rows
 
     def test_fetchone(self, fixture, mysql_handler, populate):
-        statement = f"select id, first_name, last_name from {fixture.table} where id = 1  order by id"
+        statement = (
+            f"select id, first_name, last_name from {fixture.table} where id = 1  order by id"
+        )
         row = mysql_handler.fetchone(statement)
         assert row == fixture.rows[0]
 
     def test_fetchone_param_table_name(self, fixture, mysql_handler, populate):
         """Cannot parameterise table name. Can only parameterise values."""
-        statement = (
-            "select id, first_name, last_name from %(table)s where id = 1  order by id"
-        )
+        statement = "select id, first_name, last_name from %(table)s where id = 1  order by id"
         params = {"table": fixture.table}
         with pytest.raises(connector.errors.ProgrammingError):
             mysql_handler.fetchone(
@@ -295,15 +287,15 @@ class TestMysqlHandlerPopulated:
             )
 
     def test_fetchone_params(self, fixture, mysql_handler, populate):
-        statement = f"select id, first_name, last_name from {fixture.table} where id = %s  order by id"
+        statement = (
+            f"select id, first_name, last_name from {fixture.table} where id = %s  order by id"
+        )
         params = (1,)
         row = mysql_handler.fetchone(statement, params=params)
         assert row == fixture.rows[0]
 
     def test_fetchone_no_rows_found(self, fixture, mysql_handler, populate):
-        statement = (
-            f"select id, first_name, last_name from {fixture.table} where id is null"
-        )
+        statement = f"select id, first_name, last_name from {fixture.table} where id is null"
         row = mysql_handler.fetchone(statement)
         assert row is None
 
@@ -320,9 +312,7 @@ class TestMysqlHandlerPopulated:
         rows = mysql_handler.fetchall(statement)
         assert rows == fixture.rows
 
-    def test_insert_on_duplicate_key_update_on_dup(
-        self, fixture, mysql_handler, populate
-    ):
+    def test_insert_on_duplicate_key_update_on_dup(self, fixture, mysql_handler, populate):
         on_dup = "first_name=vals.first_name,last_name=UPPER(vals.last_name)"
         mysql_handler.insert_on_duplicate_key_update(
             fixture.table, fixture.cols, fixture.cols[:1], fixture.rows, on_dup=on_dup
@@ -502,9 +492,7 @@ class TestMysqlExceptionHandling:
             assert record.levelname == "CRITICAL"
             print(record)
 
-    def test_insert_select_on_duplicate_key_update_exception(
-        self, caplog, mysql_options
-    ):
+    def test_insert_select_on_duplicate_key_update_exception(self, caplog, mysql_options):
         caplog.set_level(logging.INFO)
         table_from = "table_from"
         table_into = "table_into"
