@@ -20,7 +20,7 @@ from mysql.connector.errors import (
     OperationalError,
     ProgrammingError,
 )
-from mysqlhandler.mysql_handler import MysqlHandler
+from mysql_handler import MysqlHandler
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import logging

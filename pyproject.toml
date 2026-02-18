@@ -1,28 +1,27 @@
-[build-system]
-requires = ["setuptools >= 77.0.3"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "usss-mysqlhandler"
-version = "0.1.0"
 authors = [
   { name="Julian Briggs", email="julian.briggs@sheffield.ac.uk" },
 ]
-description = "MySQL convenience package "
-readme = "README.md"
-requires-python = ">=3.12"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
-license = "MIT"
-license-files = ["LICEN[CS]E*"]
-dynamic = ["dependencies", "optional-dependencies"]
+dependencies = [
+    "mysql-connector-python>=9.6.0",
+    "pyyaml>=6.0.3",
+]
+description = "MySQL convenience package "
+name = "usss-mysqlhandler"
+readme = "README.md"
+requires-python = ">=3.14"
+version = "0.3.0"
 
-[project.urls]
-Homepage = "https://github.com/pypa/usss-mysqlhandler"
-Issues = "https://github.com/pypa/usss-mysqlhandler/issues"
-
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
-optional-dependencies = {dev = {file = ["requirements_dev.txt"]}}
+[dependency-groups]
+dev = [
+    "mypy>=1.19.1",
+    "pylint-pytest>=1.1.8",
+    "pytest>=8.2.0",
+    "pytest-cov>=7.0.0",
+    "pytest-mock>=3.15.1",
+    "types-pyyaml>=6.0.12.20250915",
+]
