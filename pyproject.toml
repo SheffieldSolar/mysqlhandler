@@ -26,3 +26,15 @@ dev = [
     "ruff>=0.15.1",
     "types-pyyaml>=6.0.12.20250915",
 ]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

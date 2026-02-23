@@ -26,12 +26,14 @@ jobs:
     - name: Install the project
       run: uv sync --locked --all-extras --dev
 
-    - name: Lint with ruff
-      run: |
-        ## stop the build if there are Python syntax errors or undefined names
-        #flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        uv run ruff check src
+    - name: Lint with Ruff check
+      run: uv run ruff check src --line-length=100
 
+    - name: Format with Ruff format
+      run: uv run ruff format src --line-length=100
+
+    - name: Install project so uv run tests can find source
+      run: uv pip install -e .
+      
     - name: Run tests
       run: uv run pytest tests
