@@ -1,4 +1,4 @@
-"""
+""" 
 Created on 2022-02-01
 
 @author: Julian Briggs
@@ -182,9 +182,7 @@ class MysqlHandler(AbstractContextManager):
                 err.add_note(f"statement {statement}")
                 raise
 
-    def fetchone(
-        self, statement, params: Optional[Dict[str, Any]] = None
-    ) -> Tuple[Any]:
+    def fetchone(self, statement, params: Optional[Dict[str, Any]] = None) -> Tuple[Any]:
         """
         Fetch a single row from the database.
 
@@ -269,12 +267,8 @@ class MysqlHandler(AbstractContextManager):
             rows (Rows): Rows of data to insert.
             on_dup (str): Custom "on duplicate key" SQL clause.
         """
-        logger.debug(
-            "Inserting with on duplicate key update into %(table)s.", {"table": table}
-        )
-        statement = self.insert_on_duplicate_key_update_statement(
-            table, cols, keys, on_dup=on_dup
-        )
+        logger.debug("Inserting with on duplicate key update into %(table)s.", {"table": table})
+        statement = self.insert_on_duplicate_key_update_statement(table, cols, keys, on_dup=on_dup)
         logger.debug("Statement: %(statement)s", {"statement": statement})
         self.executemany(statement, rows)
 
@@ -293,9 +287,7 @@ class MysqlHandler(AbstractContextManager):
         Returns:
             str: The generated SQL statement.
         """
-        logger.debug(
-            "Generating insert statement for table %(table)s.", {"table": table}
-        )
+        logger.debug("Generating insert statement for table %(table)s.", {"table": table})
         cols_str = ",".join(cols)
         placeholders = ",".join(["%s"] * len(cols))
         cols_on_dup = tuple(col for col in cols if col not in keys)
