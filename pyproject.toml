@@ -14,7 +14,7 @@ description = "MySQL convenience package "
 name = "usss-mysqlhandler"
 readme = "README.md"
 requires-python = ">=3.14"
-version = "0.3.0"
+version = "0.3.1"
 
 [dependency-groups]
 dev = [
