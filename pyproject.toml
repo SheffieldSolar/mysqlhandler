@@ -27,14 +27,26 @@ dev = [
     "types-pyyaml>=6.0.12.20250915",
 ]
 
+[tool.mypy]
+mypy_path = ["src"]
+
+# BEGIN ANSIBLE MANAGED BLOCK
+[tool.pytest]
+addopts = ["--ignore=tests/archive"]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
 [tool.ruff]
+exclude = ["*.ipynb", "archive"]
 line-length = 100
 
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[[tool.uv.index]]
+default = true
+url = "https://pypi.org/simple"
+# END ANSIBLE MANAGED BLOCK
