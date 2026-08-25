@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 authors = [
   { name="Julian Briggs", email="julian.briggs@sheffield.ac.uk" },
@@ -14,10 +18,11 @@ description = "MySQL convenience package "
 name = "usss-mysqlhandler"
 readme = "README.md"
 requires-python = ">=3.14"
-version = "0.3.1"
+version = "0.3.2"
 
 [dependency-groups]
 dev = [
+    "build>=1.5.0",
     "mypy>=1.19.1",
     "pylint-pytest>=1.1.8",
     "pytest>=8.2.0",
@@ -30,18 +35,24 @@ dev = [
 [tool.mypy]
 mypy_path = ["src"]
 
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules = ["mysql_handler"]
+
 # BEGIN ANSIBLE MANAGED BLOCK
 [tool.pytest]
 addopts = ["--ignore=tests/archive"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 
+
 [tool.ruff]
 exclude = ["*.ipynb", "archive"]
 line-length = 100
 
-[tool.setuptools]
-package-dir = { "" = "src" }
+#[tool.setuptools]
+#package-dir = { "" = "src" }
+#py-modules = ["mysql_handler"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
